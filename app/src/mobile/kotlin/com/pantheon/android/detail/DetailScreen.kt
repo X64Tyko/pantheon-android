@@ -34,8 +34,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -62,6 +64,17 @@ private val TileBg = Color(0xFF232438)
 // than a TV's max(36vh, 320px)/40px.
 private val HERO_HEIGHT = 220.dp
 private val HERO_OVERLAP = 26.dp
+
+// Header-local scrim (see stickyHeader's own comment on why it needs one
+// independent of the backdrop's own gradient) and title text shadow —
+// named constants rather than literals inline in the composable, same
+// convention as the colors/sizing above.
+private val HeaderScrimBrush = Brush.verticalGradient(
+    0f to Color.Black.copy(alpha = 0.25f),
+    0.5f to Color.Black.copy(alpha = 0.55f),
+    1f to Color.Black.copy(alpha = 0.7f),
+)
+private val TitleTextShadow = Shadow(color = Color.Black, offset = Offset(0f, 2f), blurRadius = 8f)
 
 // Mobile counterpart of hades/src/tv/TvLibraryDetail.tsx — same
 // detail.zones gating (hero-backdrop/meta-block/genre-chips/play-button/
@@ -174,80 +187,99 @@ fun DetailScreen(
                 // offset math needed for the lock itself (only for sizing
                 // the backdrop above, which does need it).
                 stickyHeader(key = "header") {
-                    Column(
+                    Box(
                         modifier = Modifier.fillMaxWidth()
                             .onGloballyPositioned { headerHeightPx = it.size.height },
                     ) {
-                        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-                            Box(modifier = Modifier.width(110.dp).aspectRatio(2f / 3f).background(TileBg)) {
-                                AsyncImage(
-                                    model = viewModel.thumb?.let { apiClient.mediaUrl("/api/${if (contentType == "show") "shows" else "movies"}/$id/thumb") },
-                                    contentDescription = viewModel.title,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize(),
-                                )
-                            }
-                            Column(modifier = Modifier.padding(start = 14.dp)) {
-                                Text(selectedEpisode?.title ?: viewModel.title, style = MaterialTheme.typography.headlineSmall, color = Color.White)
+                        // Header-local scrim — the backdrop's own bottom-fade
+                        // gradient is sized to the *unscrolled* hero and
+                        // stops being underneath the header at all once
+                        // locked/collapsed (the header's own height can
+                        // exceed what the backdrop's gradient was tuned
+                        // for), so title/meta/overview text was reading
+                        // straight off the raw image in that state — this
+                        // scrim is part of the header itself, so it holds
+                        // regardless of scroll/collapse state or what's
+                        // actually in the backdrop image.
+                        Box(modifier = Modifier.matchParentSize().background(HeaderScrimBrush))
 
-                                if (viewModel.hasZone("meta-block")) {
-                                    Row(modifier = Modifier.padding(top = 4.dp)) {
-                                        viewModel.year?.let { Text("$it  ", color = TextDim) }
-                                        viewModel.rating?.let { Text("★ ${"%.1f".format(it)}  ", color = TextDim) }
-                                        Text(if (contentType == "show") "series" else "film", color = TextDim)
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                                Box(modifier = Modifier.width(110.dp).aspectRatio(2f / 3f).background(TileBg)) {
+                                    AsyncImage(
+                                        model = viewModel.thumb?.let { apiClient.mediaUrl("/api/${if (contentType == "show") "shows" else "movies"}/$id/thumb") },
+                                        contentDescription = viewModel.title,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
+                                Column(modifier = Modifier.padding(start = 14.dp)) {
+                                    Text(
+                                        selectedEpisode?.title ?: viewModel.title,
+                                        style = MaterialTheme.typography.headlineSmall.copy(shadow = TitleTextShadow),
+                                        color = Color.White,
+                                    )
+
+                                    if (viewModel.hasZone("meta-block")) {
+                                        Row(modifier = Modifier.padding(top = 4.dp)) {
+                                            viewModel.year?.let { Text("$it  ", color = Color.White) }
+                                            viewModel.rating?.let { Text("★ ${"%.1f".format(it)}  ", color = Color.White) }
+                                            Text(if (contentType == "show") "series" else "film", color = Color.White)
+                                        }
+                                    }
+
+                                    if (viewModel.hasZone("play-button")) {
+                                        androidx.compose.material3.Button(onClick = ::goPlay, modifier = Modifier.padding(top = 10.dp)) { Text("▶  Play") }
                                     }
                                 }
+                            }
 
-                                if (viewModel.hasZone("play-button")) {
-                                    androidx.compose.material3.Button(onClick = ::goPlay, modifier = Modifier.padding(top = 10.dp)) { Text("▶  Play") }
+                            if (viewModel.hasZone("genre-chips") && viewModel.genres.isNotEmpty()) {
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                ) {
+                                    items(viewModel.genres, key = { it }) { g ->
+                                        Text(g, color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.background(TileBg).padding(horizontal = 10.dp, vertical = 4.dp))
+                                    }
                                 }
                             }
-                        }
 
-                        if (viewModel.hasZone("genre-chips") && viewModel.genres.isNotEmpty()) {
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 20.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                            ) {
-                                items(viewModel.genres, key = { it }) { g ->
-                                    Text(g, color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.background(TileBg).padding(horizontal = 10.dp, vertical = 4.dp))
+                            val overviewText = selectedEpisode?.overview ?: viewModel.overview
+                            if (overviewText.isNotEmpty()) {
+                                var overflowing by remember { mutableStateOf(false) }
+                                Text(
+                                    overviewText,
+                                    color = TextDim,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                    onTextLayout = { result -> overflowing = result.hasVisualOverflow },
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                                )
+                                if (overflowing) {
+                                    TextButton(onClick = { overviewDialogOpen = true }, modifier = Modifier.padding(horizontal = 12.dp)) {
+                                        Text("Read more", color = GoldColor)
+                                    }
                                 }
                             }
-                        }
 
-                        val overviewText = selectedEpisode?.overview ?: viewModel.overview
-                        if (overviewText.isNotEmpty()) {
-                            var overflowing by remember { mutableStateOf(false) }
-                            Text(
-                                overviewText,
-                                color = TextDim,
-                                maxLines = 3,
-                                overflow = TextOverflow.Ellipsis,
-                                onTextLayout = { result -> overflowing = result.hasVisualOverflow },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                            )
-                            if (overflowing) {
-                                TextButton(onClick = { overviewDialogOpen = true }, modifier = Modifier.padding(horizontal = 12.dp)) {
-                                    Text("Read more", color = GoldColor)
-                                }
-                            }
-                        }
-
-                        // Clamped, same reasoning as the overview above — a
-                        // well-tagged anime rip can embed 8-10 dub/subtitle
-                        // languages, and hades' own LanguageChips.tsx shows
-                        // all of them unclamped (fine on a desktop-width
-                        // panel, not on a phone) — see item 10's own
-                        // feedback. "+N more" opens the same full list.
-                        val languages = viewModel.languages
-                        if (languages != null && (!languages.audio.isNullOrEmpty() || !languages.subtitle.isNullOrEmpty())) {
-                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
-                                languages.audio?.takeIf { it.isNotEmpty() }?.let {
-                                    LanguageRow(label = "🔊 Audio", codes = it, onShowAll = { languagesDialogOpen = true })
-                                }
-                                languages.subtitle?.takeIf { it.isNotEmpty() }?.let {
-                                    LanguageRow(label = "💬 Subtitles", codes = it, onShowAll = { languagesDialogOpen = true })
+                            // Clamped, same reasoning as the overview above —
+                            // a well-tagged anime rip can embed 8-10 dub/
+                            // subtitle languages, and hades' own
+                            // LanguageChips.tsx shows all of them unclamped
+                            // (fine on a desktop-width panel, not on a phone)
+                            // — see item 10's own feedback. "+N more" opens
+                            // the same full list.
+                            val languages = viewModel.languages
+                            if (languages != null && (!languages.audio.isNullOrEmpty() || !languages.subtitle.isNullOrEmpty())) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
+                                    languages.audio?.takeIf { it.isNotEmpty() }?.let {
+                                        LanguageRow(label = "🔊 Audio", codes = it, onShowAll = { languagesDialogOpen = true })
+                                    }
+                                    languages.subtitle?.takeIf { it.isNotEmpty() }?.let {
+                                        LanguageRow(label = "💬 Subtitles", codes = it, onShowAll = { languagesDialogOpen = true })
+                                    }
                                 }
                             }
                         }
@@ -342,7 +374,12 @@ private fun LanguageRow(label: String, codes: List<String>, onShowAll: () -> Uni
             )
         }
         if (codes.size > MAX_VISIBLE_LANGUAGES) {
-            TextButton(onClick = onShowAll) { Text("+${codes.size - MAX_VISIBLE_LANGUAGES} more", color = GoldColor) }
+            Text(
+                "+${codes.size - MAX_VISIBLE_LANGUAGES} more",
+                color = GoldColor,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.clickable(onClick = onShowAll).background(TileBg, RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+            )
         }
     }
 }
