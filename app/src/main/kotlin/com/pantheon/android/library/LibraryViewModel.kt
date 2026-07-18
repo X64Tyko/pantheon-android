@@ -8,10 +8,11 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.pantheon.android.api.ApiClient
+import com.pantheon.android.api.dto.LibraryWithSource
 import com.pantheon.android.api.dto.Movie
 import com.pantheon.android.api.dto.Show
 import com.pantheon.android.api.dto.TvZone
-import com.pantheon.android.util.quoteFilterValue
+import com.pantheon.android.filter.FilterTreeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -20,12 +21,23 @@ private const val PAGE_SIZE = 48
 private const val SEARCH_DEBOUNCE_MS = 300L
 
 // Kotlin counterpart of hades/src/tv/useZoneManifest.ts('library') combined
-// with LibraryStore.ts's fetch/loadMore/setQuery/setContentType/
-// setFilterGenre — scoped down the same deliberate way TvLibrary.tsx already
-// is (search + a content-type toggle + one genre chip, not LibraryPage's full
-// rule-builder sidebar). library-pills gates the content-type toggle rather
-// than driving a real per-library picker — same pragmatic stand-in TvLibrary
-// uses, see its own comment.
+// with LibraryStore.ts's fetch/loadMore/setQuery/toggleLibrary and its
+// FilterTreeStore-backed rule builder — real usage feedback on mobile
+// specifically asked for "just like the web version," not the TV flavor's
+// scoped-down single-genre-chip stand-in, so this is the real thing: a
+// FilterTreeState (rules + one level of groups, real operators) rather than
+// a couple of hardcoded chip fields.
+//
+// *Which* fields the rule builder offers (filterTree's own field dropdown)
+// comes from the manifest's filter-pills zone (kairos v82 migration) — the
+// same "server owns which fields are filterable, client owns how each
+// field's widget/operators work" split every other manifest zone already
+// uses, not a hardcoded field list.
+//
+// Real per-library selection (GET /api/libraries, selectedLibraryIds
+// defaulting to "all", library_ids sent only when it's a strict subset —
+// mirrors LibraryStore.ts's own searchParams() exactly) rather than the
+// generic All/Shows/Movies content-type toggle the TV flavor still uses.
 //
 // `q` has no separate wire param: ContentService.cpp's /shows and /movies
 // only read `filter`, and a bare (unquoted) word in that syntax already means
@@ -37,6 +49,11 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
         private set
     fun hasZone(id: String) = zones.any { it.id == id }
     fun zone(id: String) = zones.find { it.id == id }
+
+    // The manifest-declared field allowlist for the rule builder's field
+    // dropdown — empty until the manifest loads, at which point the filter
+    // button/panel becomes meaningful.
+    val filterFields: List<String> get() = zone("filter-pills")?.filterFields ?: emptyList()
 
     var shows by mutableStateOf<List<Show>>(emptyList())
         private set
@@ -53,24 +70,37 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
 
     var query by mutableStateOf("")
         private set
-    var contentType by mutableStateOf("all") // "all" | "show" | "movie"
+
+    var libraries by mutableStateOf<List<LibraryWithSource>>(emptyList())
         private set
-    var genres by mutableStateOf<List<String>>(emptyList())
+    var selectedLibraryIds by mutableStateOf<Set<String>>(emptySet())
         private set
-    var filterGenre by mutableStateOf("")
-        private set
+
+    val filterTree = FilterTreeState()
 
     private var page = 0
     private var searchJob: Job? = null
+    private val filterValuesCache = mutableMapOf<String, List<String>>()
 
     init {
         viewModelScope.launch {
             zones = runCatching { apiClient.service.getTvManifest().library.zones.sortedBy { it.order } }.getOrDefault(emptyList())
+            val libs = runCatching { apiClient.service.getLibraries() }.getOrDefault(emptyList())
+            libraries = libs
+            selectedLibraryIds = libs.map { it.libraryId }.toSet()
             fetch()
         }
-        viewModelScope.launch {
-            genres = runCatching { apiClient.service.getFilterValues("genre").values.orEmpty() }.getOrDefault(emptyList())
-        }
+    }
+
+    // On-demand, cached per field — mirrors PickerFilters.tsx's
+    // fetchFilterValues module-level cache. Called by the field's value
+    // picker once that field is actually selected in a rule, not eagerly
+    // for every field up front.
+    suspend fun filterValuesFor(field: String): List<String> {
+        filterValuesCache[field]?.let { return it }
+        val values = runCatching { apiClient.service.getFilterValues(field).values.orEmpty() }.getOrDefault(emptyList())
+        filterValuesCache[field] = values
+        return values
     }
 
     // Named update*/on*Change rather than set<PropertyName> — the latter
@@ -89,37 +119,63 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
         }
     }
 
-    fun updateContentType(t: String) {
-        if (contentType == t) return
-        contentType = t
+    fun toggleLibrary(libraryId: String) {
+        val next = selectedLibraryIds.toMutableSet()
+        if (!next.remove(libraryId)) next.add(libraryId)
+        selectedLibraryIds = next
         page = 0
         viewModelScope.launch { fetch() }
     }
 
-    fun updateFilterGenre(g: String) {
-        if (filterGenre == g) return
-        filterGenre = g
+    fun selectAllLibraries() {
+        selectedLibraryIds = libraries.map { it.libraryId }.toSet()
         page = 0
         viewModelScope.launch { fetch() }
+    }
+
+    // Called when the filter panel is closed/applied — the panel edits
+    // filterTree directly (it's mutable Compose state), this just triggers
+    // the actual refetch once the user is done, rather than re-fetching on
+    // every keystroke inside the panel.
+    fun applyFilters() {
+        page = 0
+        viewModelScope.launch { fetch() }
+    }
+
+    // True once libraries have loaded and every one has been explicitly
+    // deselected — distinct from "not loaded yet" (empty set before the
+    // first fetch resolves), which should just show the normal loading
+    // state instead of an empty-selection message. Mirrors LibraryStore.ts's
+    // noLibrariesSelected getter.
+    val noLibrariesSelected: Boolean get() = libraries.isNotEmpty() && selectedLibraryIds.isEmpty()
+
+    private fun selectedLibraries() = libraries.filter { it.libraryId in selectedLibraryIds }
+    private fun wantsType(type: String): Boolean {
+        if (libraries.isEmpty()) return true // not loaded yet — fetch both rather than block on it
+        return selectedLibraries().any { it.libraryType == type || it.libraryType == "mixed" }
     }
 
     private fun params(offset: Int): Map<String, String> {
         val p = mutableMapOf("limit" to PAGE_SIZE.toString(), "offset" to offset.toString(), "hide_empty" to "1")
-        val parts = listOfNotNull(
-            filterGenre.takeIf { it.isNotBlank() }?.let { "genre:${quoteFilterValue(it)}" },
-            query.trim().takeIf { it.isNotEmpty() },
-        )
-        if (parts.isNotEmpty()) p["filter"] = parts.joinToString(" ")
+        val allSelected = libraries.isNotEmpty() && selectedLibraryIds.size >= libraries.size
+        if (!allSelected && selectedLibraryIds.isNotEmpty()) p["library_ids"] = selectedLibraryIds.joinToString(",")
+        val filter = listOfNotNull(filterTree.toFilterString().takeIf { it.isNotBlank() }, query.trim().takeIf { it.isNotEmpty() })
+            .joinToString(" ")
+        if (filter.isNotBlank()) p["filter"] = filter
         return p
     }
 
     suspend fun fetch() {
+        if (noLibrariesSelected) {
+            shows = emptyList(); movies = emptyList(); total = 0; loading = false; errorMessage = null
+            return
+        }
         loading = true
         errorMessage = null
         try {
             val p = params(0)
-            val showRes = if (contentType != "movie") apiClient.service.getShows(p) else null
-            val movieRes = if (contentType != "show") apiClient.service.getMovies(p) else null
+            val showRes = if (wantsType("show")) apiClient.service.getShows(p) else null
+            val movieRes = if (wantsType("movie")) apiClient.service.getMovies(p) else null
             shows = showRes?.items.orEmpty()
             movies = movieRes?.items.orEmpty()
             total = (showRes?.total ?: 0) + (movieRes?.total ?: 0)
@@ -132,15 +188,15 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
     }
 
     fun loadMore() {
-        if (loading || loadingMore) return
+        if (loading || loadingMore || noLibrariesSelected) return
         if (shows.size + movies.size >= total) return
         viewModelScope.launch {
             loadingMore = true
             val nextPage = page + 1
             try {
                 val p = params(nextPage * PAGE_SIZE)
-                val showRes = if (contentType != "movie") apiClient.service.getShows(p) else null
-                val movieRes = if (contentType != "show") apiClient.service.getMovies(p) else null
+                val showRes = if (wantsType("show")) apiClient.service.getShows(p) else null
+                val movieRes = if (wantsType("movie")) apiClient.service.getMovies(p) else null
                 shows = shows + showRes?.items.orEmpty()
                 movies = movies + movieRes?.items.orEmpty()
                 page = nextPage

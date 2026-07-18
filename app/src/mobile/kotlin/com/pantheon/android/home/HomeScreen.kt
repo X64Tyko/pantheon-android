@@ -21,11 +21,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,16 +72,18 @@ fun HomeScreen(
         }
     }
 
-    fun onShelfItemClick(row: TvHomeRow, item: HomeMediaItem) {
-        when (row.itemAction) {
-            TvItemAction.PLAY_LATEST_EPISODE -> {
-                val show = (item as? HomeMediaItem.ShowItem)?.show
-                val latest = show?.latestEpisode
-                if (latest != null) onPlay("episode", latest.episodeId, 0)
-                else onOpenDetail(item.contentType, item.id)
-            }
-            else -> onOpenDetail(item.contentType, item.id) // TvItemAction.OPEN_DETAIL, the default
+    // Split into two explicit actions rather than one onClick — mobile tiles
+    // now select-then-act (tap once to focus, Play/Details buttons appear,
+    // tap the already-selected tile again to play) instead of navigating on
+    // the first tap. "Details" always opens Detail; "Play" honors the row's
+    // PLAY_LATEST_EPISODE itemAction the same way the old single onClick did.
+    fun shelfItemDetails(item: HomeMediaItem) = onOpenDetail(item.contentType, item.id)
+    fun shelfItemPlay(row: TvHomeRow, item: HomeMediaItem) {
+        if (row.itemAction == TvItemAction.PLAY_LATEST_EPISODE) {
+            val latest = (item as? HomeMediaItem.ShowItem)?.show?.latestEpisode
+            if (latest != null) { onPlay("episode", latest.episodeId, 0); return }
         }
+        resolveAndPlay(item.contentType, item.id)
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
@@ -101,13 +110,25 @@ fun HomeScreen(
                 )
             }
             item {
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+                // Guide sits next to Library rather than as its own
+                // manifest-ordered row further down — a quick action, not a
+                // shelf, matching hades/src/tv/TvHome.tsx's own
+                // quickActionRow (Library+Guide together right after the
+                // hero). Still gated on the manifest actually declaring a
+                // "guide" row rather than hardcoded, so a manifest that
+                // omits Guide entirely still hides the button.
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     OutlinedButton(onClick = onNavigateLibrary) { Text("Library") }
+                    if (viewModel.rows.any { it.type == "guide" }) {
+                        OutlinedButton(onClick = onNavigateGuide) { Text("📺  Guide") }
+                    }
                 }
             }
-            items(viewModel.rows.filter { it.type != "hero" }, key = { it.id }) { row ->
+            items(viewModel.rows.filter { it.type != "hero" && it.type != "guide" }, key = { it.id }) { row ->
                 when {
-                    row.type == "guide" -> GuideEntryZone(onClick = onNavigateGuide)
                     row.id == "continue-watching" -> {
                         if (viewModel.continueWatching.isNotEmpty()) {
                             ContinueWatchingZone(
@@ -124,7 +145,8 @@ fun HomeScreen(
                                 apiClient = apiClient,
                                 title = row.title ?: row.id,
                                 items = items,
-                                onItemClick = { item -> onShelfItemClick(row, item) },
+                                onItemPlay = { item -> shelfItemPlay(row, item) },
+                                onItemDetails = { item -> shelfItemDetails(item) },
                                 onEndTileClick = if (row.endTile != null) onNavigateLibrary else null,
                             )
                         }
@@ -190,9 +212,14 @@ private fun ShelfZone(
     apiClient: ApiClient,
     title: String,
     items: List<HomeMediaItem>,
-    onItemClick: (HomeMediaItem) -> Unit,
+    onItemPlay: (HomeMediaItem) -> Unit,
+    onItemDetails: (HomeMediaItem) -> Unit,
     onEndTileClick: (() -> Unit)?,
 ) {
+    // Scoped per shelf, not globally — selecting a tile in one row doesn't
+    // affect any other row's own selection.
+    var selectedId by remember { mutableStateOf<String?>(null) }
+
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         Text(
             title,
@@ -204,7 +231,21 @@ private fun ShelfZone(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
         ) {
-            items(items, key = { it.id }) { item -> MediaCard(apiClient, item, onClick = { onItemClick(item) }) }
+            items(items, key = { it.id }) { item ->
+                MediaCard(
+                    apiClient, item,
+                    selected = selectedId == item.id,
+                    onTap = {
+                        // First tap focuses/selects (reveals Play/Details);
+                        // tapping the already-selected tile again plays it —
+                        // touch's answer to the D-pad flavor's focus-then-
+                        // Enter model, since touch has no separate "hover".
+                        if (selectedId == item.id) onItemPlay(item) else selectedId = item.id
+                    },
+                    onPlay = { onItemPlay(item) },
+                    onDetails = { onItemDetails(item) },
+                )
+            }
             if (onEndTileClick != null) {
                 item { EndTile(onClick = onEndTileClick) }
             }
@@ -213,17 +254,15 @@ private fun ShelfZone(
 }
 
 @Composable
-private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .width(120.dp)
-            .clickable(onClick = onClick),
-    ) {
+private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, selected: Boolean, onTap: () -> Unit, onPlay: () -> Unit, onDetails: () -> Unit) {
+    Column(modifier = Modifier.width(120.dp)) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .background(Color(0xFF232438)),
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0xFF232438))
+                .clickable(onClick = onTap),
         ) {
             AsyncImage(
                 model = item.thumbUrl(apiClient),
@@ -231,6 +270,15 @@ private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, onClick: () -> 
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
+            if (selected) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onPlay), color = GoldColor) {
+                        Text("▶", color = Color.Black, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+                    }
+                    TextButton(onClick = onDetails) { Text("Details", color = Color.White) }
+                }
+            }
         }
         Text(
             item.title,
@@ -301,23 +349,3 @@ private fun EndTile(onClick: () -> Unit) {
     }
 }
 
-// The Guide zone is deliberately not manifest-rendered content (see project
-// plan §1/§6) — it's a bespoke native screen fed by the standard API, not a
-// generic zone. Unlike hades/src/tv/TvHome.tsx (which embeds the actual live
-// preview/grid inline on Home), this is just a navigation entry point into
-// the real Guide screen (guide/GuideScreen.kt) — embedding a second live
-// ExoPlayer instance directly in Home's own scroll list would add real
-// lifecycle complexity (two concurrent players, teardown on scroll-away)
-// for a screen this app doesn't otherwise embed video into at all.
-@Composable
-private fun GuideEntryZone(onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("📺  Live Guide", color = Color.White, style = MaterialTheme.typography.titleMedium)
-    }
-}

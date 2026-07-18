@@ -10,13 +10,11 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
@@ -50,9 +48,11 @@ import com.pantheon.android.api.ApiClient
 import com.pantheon.android.home.HomeMediaItem
 import com.pantheon.android.home.thumbUrl
 
-private val BgColor = Color(0xFF1B1C29)
-private val GoldColor = Color(0xFFE0B84E)
-private val TextDim = Color(0xFFB5B5C4)
+// Not file-private: TvFilterPanel.kt (same package) reuses these tokens and
+// the TvChip/TvTextButton primitives below.
+val BgColor = Color(0xFF1B1C29)
+val GoldColor = Color(0xFFE0B84E)
+val TextDim = Color(0xFFB5B5C4)
 private val TileBg = Color(0xFF232438)
 
 // TV counterpart of the mobile flavor's LibraryScreen.kt — same
@@ -61,6 +61,13 @@ private val TileBg = Color(0xFF232438)
 // OutlinedTextField (not tv-material, which has no text field) — already the
 // established pattern for this app's Connect/Login screens, themed
 // correctly because PantheonTheme.kt wraps both MaterialTheme trees.
+//
+// Filters button opens TvFilterPanel — the same FilterTreeState/FIELD_DEFS
+// rule builder as mobile's FilterPanel, but built from inline chip rows
+// instead of DropdownMenu popups: nested popup focus scopes are a known
+// D-pad trap (see the search field's own onPreviewKeyEvent workaround
+// below), so field/operator selection is just another row of TvChips in
+// the normal focus-traversal order.
 @Composable
 fun LibraryScreen(
     apiClient: ApiClient,
@@ -70,6 +77,7 @@ fun LibraryScreen(
     val viewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(apiClient))
     val gridState = rememberLazyGridState()
     val focusManager = LocalFocusManager.current
+    var filtersOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }.collect { lastVisible ->
@@ -78,7 +86,20 @@ fun LibraryScreen(
         }
     }
 
-    val genreFilterEnabled = (viewModel.zone("filter-pills")?.filterFields ?: emptyList()).contains("genre")
+    val activeFilterCount = viewModel.filterTree.ruleCount +
+        (if (viewModel.libraries.isNotEmpty() && viewModel.selectedLibraryIds.size < viewModel.libraries.size) 1 else 0)
+
+    if (filtersOpen) {
+        TvFilterPanel(
+            availableFields = viewModel.filterFields,
+            tree = viewModel.filterTree,
+            libraries = viewModel.libraries,
+            selectedLibraryIds = viewModel.selectedLibraryIds,
+            onToggleLibrary = viewModel::toggleLibrary,
+            fetchValuesFor = viewModel::filterValuesFor,
+            onClose = { filtersOpen = false; viewModel.applyFilters() },
+        )
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -93,6 +114,12 @@ fun LibraryScreen(
                     color = Color.White,
                     modifier = Modifier.padding(start = 16.dp).weight(1f),
                 )
+                if (viewModel.filterFields.isNotEmpty() || viewModel.libraries.isNotEmpty()) {
+                    TvTextButton(
+                        text = if (activeFilterCount > 0) "Filters ($activeFilterCount)" else "Filters",
+                        onClick = { filtersOpen = true },
+                    )
+                }
             }
 
             if (viewModel.hasZone("search-bar")) {
@@ -121,26 +148,7 @@ fun LibraryScreen(
                 )
             }
 
-            if (viewModel.hasZone("library-pills")) {
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TvChip("All", viewModel.contentType == "all") { viewModel.updateContentType("all") }
-                    TvChip("Shows", viewModel.contentType == "show") { viewModel.updateContentType("show") }
-                    TvChip("Movies", viewModel.contentType == "movie") { viewModel.updateContentType("movie") }
-                }
-            }
-
-            if (genreFilterEnabled && viewModel.genres.isNotEmpty()) {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 40.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                ) {
-                    item { TvChip("All Genres", viewModel.filterGenre.isEmpty()) { viewModel.updateFilterGenre("") } }
-                    items(viewModel.genres, key = { it }) { g -> TvChip(g, viewModel.filterGenre == g) { viewModel.updateFilterGenre(g) } }
-                }
-            }
-
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp)) {
                 if (viewModel.loading) {
                     CircularProgressIndicator(color = GoldColor, modifier = Modifier.align(Alignment.Center))
                 } else {
@@ -172,7 +180,7 @@ fun LibraryScreen(
 }
 
 @Composable
-private fun TvChip(label: String, active: Boolean, onClick: () -> Unit) {
+fun TvChip(label: String, active: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     Surface(
         onClick = onClick,
@@ -191,7 +199,7 @@ private fun TvChip(label: String, active: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun TvTextButton(text: String, onClick: () -> Unit) {
+fun TvTextButton(text: String, onClick: () -> Unit) {
     Surface(onClick = onClick, colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent)) {
         Text(text, color = Color.White, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
     }

@@ -1,7 +1,6 @@
 package com.pantheon.android.library
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,16 +10,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -30,10 +25,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,9 +46,11 @@ private val GoldColor = Color(0xFFE0B84E)
 private val TextDim = Color(0xFFB5B5C4)
 private val TileBg = Color(0xFF232438)
 
-// Mobile counterpart of hades/src/tv/TvLibrary.tsx — same manifest-gated
-// scope (search + content-type toggle + one genre filter, not the desktop
-// rule-builder sidebar), same LibraryViewModel shared with the TV flavor.
+// Mobile counterpart of hades/src/tv/TvLibrary.tsx — search bar +
+// LibraryViewModel shared with the TV flavor, plus a real "Filters" button
+// opening FilterPanel's full rule-builder overlay (real usage feedback:
+// "just like the web version," field list manifest-driven — see
+// LibraryViewModel's own comments). No more inline genre-only chip row.
 // Pagination is scroll-position-triggered rather than Paging3 — a real
 // PagingSource is the noted future upgrade (see project plan §6), not
 // required for this to page correctly: LazyVerticalGrid diffs by key, so
@@ -65,6 +64,7 @@ fun LibraryScreen(
 ) {
     val viewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(apiClient))
     val gridState = rememberLazyGridState()
+    var filtersOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }.collect { lastVisible ->
@@ -73,7 +73,20 @@ fun LibraryScreen(
         }
     }
 
-    val genreFilterEnabled = (viewModel.zone("filter-pills")?.filterFields ?: emptyList()).contains("genre")
+    val activeFilterCount = viewModel.filterTree.ruleCount +
+        (if (viewModel.libraries.isNotEmpty() && viewModel.selectedLibraryIds.size < viewModel.libraries.size) 1 else 0)
+
+    if (filtersOpen) {
+        FilterPanel(
+            availableFields = viewModel.filterFields,
+            tree = viewModel.filterTree,
+            libraries = viewModel.libraries,
+            selectedLibraryIds = viewModel.selectedLibraryIds,
+            onToggleLibrary = viewModel::toggleLibrary,
+            fetchValuesFor = viewModel::filterValuesFor,
+            onClose = { filtersOpen = false; viewModel.applyFilters() },
+        )
+    }
 
     Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -88,6 +101,14 @@ fun LibraryScreen(
                     color = Color.White,
                     modifier = Modifier.padding(start = 8.dp).weight(1f),
                 )
+                if (viewModel.filterFields.isNotEmpty() || viewModel.libraries.isNotEmpty()) {
+                    TextButton(onClick = { filtersOpen = true }) {
+                        Text(
+                            if (activeFilterCount > 0) "Filters ($activeFilterCount)" else "Filters",
+                            color = if (activeFilterCount > 0) GoldColor else Color.White,
+                        )
+                    }
+                }
             }
 
             if (viewModel.hasZone("search-bar")) {
@@ -100,28 +121,7 @@ fun LibraryScreen(
                 )
             }
 
-            if (viewModel.hasZone("library-pills")) {
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip("All", viewModel.contentType == "all") { viewModel.updateContentType("all") }
-                    Chip("Shows", viewModel.contentType == "show") { viewModel.updateContentType("show") }
-                    Chip("Movies", viewModel.contentType == "movie") { viewModel.updateContentType("movie") }
-                }
-            }
-
-            if (genreFilterEnabled && viewModel.genres.isNotEmpty()) {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                ) {
-                    item { Chip("All Genres", viewModel.filterGenre.isEmpty()) { viewModel.updateFilterGenre("") } }
-                    items(viewModel.genres, key = { it }) { g ->
-                        Chip(g, viewModel.filterGenre == g) { viewModel.updateFilterGenre(g) }
-                    }
-                }
-            }
-
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp)) {
                 if (viewModel.loading) {
                     CircularProgressIndicator(color = GoldColor, modifier = Modifier.align(Alignment.Center))
                 } else {
@@ -149,20 +149,6 @@ fun LibraryScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun Chip(label: String, active: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (active) GoldColor else Color.Transparent)
-            .border(1.dp, if (active) GoldColor else TextDim, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-    ) {
-        Text(label, color = if (active) Color.Black else Color.White, style = MaterialTheme.typography.labelMedium)
     }
 }
 
