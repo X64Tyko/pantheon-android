@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.Episode
+import com.pantheon.android.api.dto.MediaLanguages
 import com.pantheon.android.api.dto.MovieDetail
 import com.pantheon.android.api.dto.ResolvedPlayTarget
 import com.pantheon.android.api.dto.ShowDetail
@@ -36,6 +37,8 @@ class DetailViewModel(private val apiClient: ApiClient, private val contentType:
     var movie by mutableStateOf<MovieDetail?>(null)
         private set
     var seasons by mutableStateOf<List<SeasonGroup>>(emptyList())
+        private set
+    var languages by mutableStateOf<MediaLanguages?>(null)
         private set
     var errorMessage by mutableStateOf<String?>(null)
         private set
@@ -65,8 +68,10 @@ class DetailViewModel(private val apiClient: ApiClient, private val contentType:
                     seasons = episodes.groupBy { it.season }
                         .toSortedMap()
                         .map { (num, eps) -> SeasonGroup(num, seasonNames[num] ?: "Season $num", eps.sortedBy { it.episode }) }
+                    languages = runCatching { apiClient.service.getShowLanguages(id) }.getOrNull()
                 } else {
                     movie = apiClient.service.getMovie(id)
+                    languages = runCatching { apiClient.service.getMovieLanguages(id) }.getOrNull()
                 }
             } catch (e: Exception) {
                 errorMessage = "Couldn't load: ${e.message ?: "unknown error"}"

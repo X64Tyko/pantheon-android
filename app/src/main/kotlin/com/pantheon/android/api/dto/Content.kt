@@ -98,6 +98,13 @@ data class Episode(
     val thumb: String? = null,
 )
 
+// GET /api/shows/:id/languages, /api/movies/:id/languages — ISO 639-2 codes,
+// mirrors hades/src/api/types.ts's MediaLanguages. Can legitimately be long
+// (a well-tagged anime rip may embed 8-10 dub/subtitle languages) — see
+// DetailViewModel's own comment on why this needs to be a distinct field
+// from genres, which never gets long enough to need clamping.
+data class MediaLanguages(val audio: List<String>? = null, val subtitle: List<String>? = null)
+
 // ── Library screen ───────────────────────────────────────────────────────────
 
 data class LibraryWithSource(
