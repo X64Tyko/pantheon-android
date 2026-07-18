@@ -1,0 +1,10 @@
+<resources>
+    <!-- Approximate sRGB equivalents of hades/src/index.css's hds oklch
+         tokens, for the one place Android needs a flat color before Compose
+         (and its own oklch-aware token reader, once tv-tokens.json is wired
+         up) ever gets a chance to run — the window background behind the
+         splash/first frame. Not the source of truth; hades/public/tv-tokens.json
+         is, once the app reads it at runtime. -->
+    <color name="hds_bg">#1B1C29</color>
+    <color name="hds_gold">#E0B84E</color>
+</resources>

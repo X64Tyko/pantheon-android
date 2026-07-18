@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Direct-connection mode (project plan §7) means an arbitrary user-entered
+     server address, almost always a plain-HTTP LAN address with no TLS
+     configured — the same Jellyfin-style "just type the IP" model this was
+     deliberately designed to match. Android blocks cleartext HTTP by default
+     since API 28; this is a real requirement of that architecture, not a
+     security shortcut — restricting to only private IP ranges would break
+     for anyone reaching their server via a plain-HTTP hostname/reverse proxy
+     instead of a raw IP. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

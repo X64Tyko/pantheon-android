@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Pantheon" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/hds_bg</item>
+        <item name="android:statusBarColor">@color/hds_bg</item>
+        <item name="android:navigationBarColor">@color/hds_bg</item>
+    </style>
+</resources>
