@@ -119,13 +119,19 @@ fun DetailScreen(
         }
     }
 
-    // Scrolls so season `index`'s block starts just below the sticky
+    // Scrolls so season `seasonIndex`'s block starts just below the sticky
     // header instead of wherever Compose's default bring-into-view would
     // otherwise land it. A negative scrollOffset pushes the target *down*
     // (LazyListState's own convention: positive scrolls it up/off toward
     // the start) by the header's height, clearing it.
-    fun scrollBelowHeader(index: Int) {
-        scope.launch { listState.animateScrollToItem(index, scrollOffset = -headerHeightPx) }
+    //
+    // +1 because seasonIndex is the position within viewModel.seasons, but
+    // the LazyColumn's own flat item list starts with the stickyHeader
+    // ("header") occupying slot 0 first — passing seasonIndex straight
+    // through targeted the header itself for the first season and was off
+    // by one for every season after it.
+    fun scrollBelowHeader(seasonIndex: Int) {
+        scope.launch { listState.animateScrollToItem(seasonIndex + 1, scrollOffset = -headerHeightPx) }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
