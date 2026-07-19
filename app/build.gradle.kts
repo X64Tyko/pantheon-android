@@ -11,12 +11,37 @@ android {
     namespace = "com.pantheon.android"
     compileSdk = 37
 
+    // Bump these two *together* whenever the major or minor version
+    // changes: set versionBaseBuild to whatever ANDROID_VERSION_CODE (CI's
+    // run_number, see below) is about to be at the time of the bump, so
+    // versionName's trailing patch number restarts near 0 instead of
+    // continuing the previous minor version's build count (e.g. jumping
+    // straight to "0.2.150" instead of "0.2.1"). versionCode itself is
+    // never reset this way — see its own comment below for why.
+    val versionMajorMinor = "0.1"
+    val versionBaseBuild = 0
+
     defaultConfig {
         applicationId = "com.pantheon.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI sets ANDROID_VERSION_CODE from the GitHub Actions run number
+        // (see .github/workflows/build.yml) so every build's versionCode is
+        // guaranteed to increase — sideloading is this app's only install
+        // path (no Play Store/Amazon Appstore listing), and Android's
+        // package manager silently refuses to install an APK over an
+        // existing one whose versionCode isn't strictly higher, so a static
+        // versionCode meant "update" installs could quietly no-op.
+        // versionCode is NEVER reset, even across major/minor bumps — it
+        // has to keep climbing forever regardless of what versionName says,
+        // or a real device with an old build installed could get stuck
+        // refusing a supposedly-newer sideload. Local (non-CI) builds fall
+        // back to a fixed versionCode of 1, which is fine since a local
+        // `installDebug` run uninstalls/reinstalls rather than
+        // update-installs anyway.
+        val ciVersionCode = System.getenv("ANDROID_VERSION_CODE")?.toIntOrNull()
+        versionCode = ciVersionCode ?: 1
+        versionName = if (ciVersionCode != null) "$versionMajorMinor.${ciVersionCode - versionBaseBuild}" else "$versionMajorMinor.0-dev"
     }
 
     // Two independent axes: which store/services this build targets (Google

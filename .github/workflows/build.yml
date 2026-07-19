@@ -9,6 +9,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Read by app/build.gradle.kts's defaultConfig (which also derives
+    # versionName from this) — run_number increments on every workflow run
+    # (push, PR, or manual dispatch alike), so versionCode is guaranteed
+    # strictly higher than the last build's, which sideloaded installs need
+    # to actually update in place rather than silently no-op.
+    env:
+      ANDROID_VERSION_CODE: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
 
