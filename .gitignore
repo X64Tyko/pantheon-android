@@ -9,3 +9,10 @@
 .cxx/
 local.properties
 app/build/
+
+# Signing material must never enter the repo — CI decodes the release
+# keystore from a secret at build time (see .github/workflows/build.yml),
+# it's never checked in.
+*.jks
+*.keystore
+*.p12
