@@ -102,15 +102,24 @@ fun HomeScreen(
                 )
             }
             item {
+                // Guide sits next to Library in this quick-action row
+                // rather than as its own manifest-ordered row further down
+                // — matches the mobile flavor's own HomeScreen.kt (real
+                // usage feedback: "Guide button needs to be next to
+                // library"). Still gated on the manifest actually declaring
+                // a "guide" row rather than hardcoded, so a manifest that
+                // omits Guide entirely still hides the button.
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 8.dp)) {
                     FocusableTextButton(text = "Library", onClick = onNavigateLibrary)
+                    if (viewModel.rows.any { it.type == "guide" }) {
+                        FocusableTextButton(text = "📺  Guide", onClick = onNavigateGuide, modifier = Modifier.padding(start = 12.dp))
+                    }
                     Box(modifier = Modifier.weight(1f))
                     FocusableTextButton(text = "👤 Switch Profile", onClick = onSwitchProfile)
                 }
             }
-            items(viewModel.rows.filter { it.type != "hero" }, key = { it.id }) { row ->
+            items(viewModel.rows.filter { it.type != "hero" && it.type != "guide" }, key = { it.id }) { row ->
                 when {
-                    row.type == "guide" -> GuideEntryZone(onClick = onNavigateGuide)
                     row.id == "continue-watching" -> {
                         if (viewModel.continueWatching.isNotEmpty()) {
                             ContinueWatchingZone(
@@ -255,21 +264,6 @@ private fun EndTile(onClick: () -> Unit) {
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("Continue in\nLibrary", color = TextDim, style = MaterialTheme.typography.labelMedium)
-        }
-    }
-}
-
-// Navigation entry point into the real Guide screen, not embedded inline —
-// see the mobile flavor's identical GuideEntryZone comment for why.
-@Composable
-private fun GuideEntryZone(onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent),
-    ) {
-        Box(modifier = Modifier.fillMaxWidth().height(90.dp).padding(horizontal = 40.dp, vertical = 8.dp), contentAlignment = Alignment.CenterStart) {
-            Text("📺  Live Guide", color = Color.White)
         }
     }
 }
