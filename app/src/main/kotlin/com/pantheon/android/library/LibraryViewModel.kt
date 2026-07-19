@@ -3,6 +3,7 @@ package com.pantheon.android.library
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
@@ -11,12 +12,30 @@ import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.LibraryWithSource
 import com.pantheon.android.api.dto.Movie
 import com.pantheon.android.api.dto.Show
+import com.pantheon.android.api.dto.TvTheme
 import com.pantheon.android.api.dto.TvZone
 import com.pantheon.android.filter.FilterTreeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.random.Random
+
+// Parses a manifest theme color's hex ("#RRGGBB" or CSS-order "#RRGGBBAA",
+// alpha LAST — see generate-tv-tokens.mjs's toHex()) into a Compose Color.
+// Deliberately not android.graphics.Color.parseColor: that expects Android's
+// own #AARRGGBB (alpha FIRST) packing, which would silently misread an
+// 8-digit CSS hex's bytes as the wrong channels.
+private fun parseCssHex(hex: String): Color? = try {
+    val h = hex.removePrefix("#")
+    when (h.length) {
+        6 -> Color(h.substring(0, 2).toInt(16), h.substring(2, 4).toInt(16), h.substring(4, 6).toInt(16))
+        8 -> Color(
+            h.substring(0, 2).toInt(16), h.substring(2, 4).toInt(16),
+            h.substring(4, 6).toInt(16), h.substring(6, 8).toInt(16),
+        )
+        else -> null
+    }
+} catch (e: NumberFormatException) { null }
 
 private const val PAGE_SIZE = 48
 private const val SEARCH_DEBOUNCE_MS = 300L
@@ -50,6 +69,16 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
         private set
     fun hasZone(id: String) = zones.any { it.id == id }
     fun zone(id: String) = zones.find { it.id == id }
+
+    var theme by mutableStateOf<TvTheme?>(null)
+        private set
+
+    // Resolves a design-token color to a Compose Color, falling back when
+    // the manifest hasn't loaded yet, has no theme (fresh checkout before
+    // the generator has ever run), or doesn't have this specific token —
+    // never a hard failure, the UI always renders something.
+    fun themeColor(token: String, fallback: Color): Color =
+        theme?.tokens?.colors?.get(token)?.hex?.let(::parseCssHex) ?: fallback
 
     // The manifest-declared field allowlist for the rule builder's field
     // dropdown — empty until the manifest loads, at which point the filter
@@ -100,7 +129,9 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            zones = runCatching { apiClient.service.getTvManifest().library.zones.sortedBy { it.order } }.getOrDefault(emptyList())
+            val manifest = runCatching { apiClient.service.getTvManifest() }.getOrNull()
+            zones = manifest?.library?.zones?.sortedBy { it.order } ?: emptyList()
+            theme = manifest?.theme
             val libs = runCatching { apiClient.service.getLibraries() }.getOrDefault(emptyList())
             libraries = libs
             selectedLibraryIds = libs.map { it.libraryId }.toSet()

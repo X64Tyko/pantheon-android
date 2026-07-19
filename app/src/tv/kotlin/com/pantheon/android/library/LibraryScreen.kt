@@ -1,5 +1,6 @@
 package com.pantheon.android.library
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,7 +16,9 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -27,6 +30,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -39,6 +44,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
@@ -54,6 +60,10 @@ val BgColor = Color(0xFF1B1C29)
 val GoldColor = Color(0xFFE0B84E)
 val TextDim = Color(0xFFB5B5C4)
 private val TileBg = Color(0xFF232438)
+// hds-violet's own baked-in value, only used if the manifest has no theme
+// yet (fresh checkout before the token generator has ever run) — the real
+// value normally comes from LibraryViewModel.themeColor("hds-violet", ...).
+private val VioletFallback = Color(0xFF9991EB)
 
 // TV counterpart of the mobile flavor's LibraryScreen.kt — same
 // LibraryViewModel, D-pad-focusable androidx.tv.material3 Surfaces instead
@@ -129,29 +139,63 @@ fun LibraryScreen(
             }
 
             if (viewModel.hasZone("search-bar")) {
-                // A plain Material3 TextField swallows DPAD up/down as cursor
-                // movement once focused, so D-pad navigation dead-ends there
-                // with no way to continue to the rest of the screen — a real
-                // TV-only trap not present on touch/mouse input. Intercept
-                // those two keys ahead of the field's own handling and drive
-                // normal Compose focus traversal instead; everything else
-                // (typing, left/right cursor movement, DPAD_CENTER to edit)
-                // still reaches the field untouched.
-                OutlinedTextField(
-                    value = viewModel.query,
-                    onValueChange = viewModel::onQueryChange,
-                    placeholder = { androidx.compose.material3.Text("Search library…") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp)
-                        .onPreviewKeyEvent { event ->
-                            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                            when (event.key) {
-                                Key.DirectionDown -> { focusManager.moveFocus(FocusDirection.Down); true }
-                                Key.DirectionUp -> { focusManager.moveFocus(FocusDirection.Up); true }
-                                else -> false
-                            }
-                        },
-                )
+                var searchEditing by remember { mutableStateOf(false) }
+                val searchFocusRequester = remember { FocusRequester() }
+                if (searchEditing) {
+                    LaunchedEffect(Unit) { searchFocusRequester.requestFocus() }
+                    // A plain Material3 TextField swallows DPAD up/down as cursor
+                    // movement once focused, so D-pad navigation dead-ends there
+                    // with no way to continue to the rest of the screen — a real
+                    // TV-only trap not present on touch/mouse input. Intercept
+                    // those two keys ahead of the field's own handling and drive
+                    // normal Compose focus traversal instead; everything else
+                    // (typing, left/right cursor movement) still reaches the
+                    // field untouched. Back collapses back to the button below
+                    // instead of leaving the whole Library screen — the field
+                    // losing focus for any reason (Up/Down/Back) collapses it,
+                    // one rule instead of three separate special cases.
+                    OutlinedTextField(
+                        value = viewModel.query,
+                        onValueChange = viewModel::onQueryChange,
+                        placeholder = { androidx.compose.material3.Text("Search library…") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp)
+                            .focusRequester(searchFocusRequester)
+                            .onFocusChanged { if (!it.isFocused) searchEditing = false }
+                            .onPreviewKeyEvent { event ->
+                                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                when (event.key) {
+                                    Key.DirectionDown -> { focusManager.moveFocus(FocusDirection.Down); true }
+                                    Key.DirectionUp -> { focusManager.moveFocus(FocusDirection.Up); true }
+                                    Key.Back -> { searchEditing = false; true }
+                                    else -> false
+                                }
+                            },
+                    )
+                } else {
+                    // Search only becomes an actual editable field — and only
+                    // then shows the software keyboard — once explicitly
+                    // selected (DPAD_CENTER), not merely when D-pad focus
+                    // traversal lands here. A plain Compose TextField shows
+                    // the keyboard on FOCUS alone, which on a D-pad remote
+                    // fires just from navigating past this row on the way to
+                    // something else — a real TV-only annoyance touch/mouse
+                    // input never has.
+                    Surface(
+                        onClick = { searchEditing = true },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp),
+                        colors = ClickableSurfaceDefaults.colors(
+                            containerColor = TileBg,
+                            focusedContainerColor = Color(0xFF2E2F45),
+                        ),
+                    ) {
+                        Text(
+                            viewModel.query.ifEmpty { "Search library…" },
+                            color = if (viewModel.query.isEmpty()) TextDim else Color.White,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        )
+                    }
+                }
             }
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp)) {
@@ -169,7 +213,11 @@ fun LibraryScreen(
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         items(items, key = { "${it.contentType}-${it.id}" }) { item ->
-                            LibraryTile(apiClient, item, onClick = { onOpenDetail(item.contentType, item.id) })
+                            LibraryTile(
+                                apiClient, item,
+                                onClick = { onOpenDetail(item.contentType, item.id) },
+                                focusBorderColor = viewModel.themeColor("hds-violet", fallback = VioletFallback),
+                            )
                         }
                         if (viewModel.loadingMore) {
                             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -212,15 +260,32 @@ fun TvTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifie
 }
 
 @Composable
-private fun LibraryTile(apiClient: ApiClient, item: HomeMediaItem, onClick: () -> Unit) {
+private fun LibraryTile(apiClient: ApiClient, item: HomeMediaItem, onClick: () -> Unit, focusBorderColor: Color) {
     var focused by remember { mutableStateOf(false) }
     Column {
-        Surface(
-            onClick = onClick,
-            modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).onFocusChanged { focused = it.isFocused },
-            colors = ClickableSurfaceDefaults.colors(containerColor = TileBg),
-        ) {
-            AsyncImage(model = item.thumbUrl(apiClient), contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        // Surface's own default focusedScale (1.1x, see androidx.tv.material3
+        // ClickableSurfaceDefaults.scale()) visually grows past this Box's
+        // laid-out bounds — scale is a paint-time transform, it doesn't
+        // reserve extra layout space the way changing the actual size would
+        // — which used to paint straight over the title below it. Clipping
+        // this outer Box (sized to the fixed aspect ratio, not affected by
+        // the inner Surface's own scale) contains that zoom to the tile's
+        // own frame: the poster still visibly scales/crops on focus, it just
+        // can't bleed into the caption or the next grid row anymore.
+        Box(modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp))) {
+            Surface(
+                onClick = onClick,
+                modifier = Modifier.fillMaxSize().onFocusChanged { focused = it.isFocused },
+                colors = ClickableSurfaceDefaults.colors(containerColor = TileBg),
+                // ClickableSurfaceDefaults.border() defaults focusedBorder to
+                // Border.None — a focus ring here isn't a platform default,
+                // it has to be requested explicitly.
+                border = ClickableSurfaceDefaults.border(
+                    focusedBorder = Border(BorderStroke(2.dp, focusBorderColor), inset = 0.dp, shape = RoundedCornerShape(8.dp)),
+                ),
+            ) {
+                AsyncImage(model = item.thumbUrl(apiClient), contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
         }
         Text(
             item.title,

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
@@ -31,6 +32,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
@@ -99,12 +101,31 @@ fun DetailScreen(
     val listState = rememberLazyListState()
     val playFocusRequester = remember { FocusRequester() }
     var expandedSeasonNumber by remember { mutableStateOf<Int?>(null) }
+    // Measured once off the sticky header's own Column below — needed to
+    // keep D-pad focus landing *below* it rather than centered underneath
+    // it (real feedback: "Seasons and episodes when focused...appear in the
+    // middle of the screen, under the details content instead of below
+    // it"). Compose's default focus-triggered scroll only knows the
+    // LazyColumn's own viewport (the full screen), not that the sticky
+    // header visually covers the top of it, so left alone it centers the
+    // newly focused item somewhere in that full viewport — including
+    // straight under the header.
+    var headerHeightPx by remember { mutableStateOf(0) }
 
     fun goPlay() {
         scope.launch {
             val target = viewModel.resolvePlayTarget()
             if (target != null) onPlay(target.kind, target.id, target.positionMs)
         }
+    }
+
+    // Scrolls so season `index`'s block starts just below the sticky
+    // header instead of wherever Compose's default bring-into-view would
+    // otherwise land it. A negative scrollOffset pushes the target *down*
+    // (LazyListState's own convention: positive scrolls it up/off toward
+    // the start) by the header's height, clearing it.
+    fun scrollBelowHeader(index: Int) {
+        scope.launch { listState.animateScrollToItem(index, scrollOffset = -headerHeightPx) }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
@@ -138,13 +159,18 @@ fun DetailScreen(
 
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             stickyHeader(key = "header") {
-                // .background(BgColor) is load-bearing, not decorative — see
-                // the mobile flavor's own DetailScreen.kt comment: once this
-                // item locks to the top of the screen, the season/episode
-                // list below keeps scrolling underneath it, and without an
-                // opaque background here the header's own transparent gaps
-                // (around the overview text) let that content bleed through.
-                Column(modifier = Modifier.fillMaxWidth().background(BgColor)) {
+                // No background here — deliberately transparent, same
+                // reasoning as the mobile flavor's own DetailScreen.kt: once
+                // stuck at the top, whatever's actually behind this header's
+                // transparent gaps starts as the fixed hero backdrop (which
+                // should show through, not get hidden behind it) and only
+                // becomes list content once a season block has genuinely
+                // scrolled up underneath — at which point *that* block's own
+                // opaque background (below) hides it instead.
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                        .onGloballyPositioned { headerHeightPx = it.size.height },
+                ) {
                     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 16.dp)) {
                         Box(modifier = Modifier.width(160.dp).aspectRatio(2f / 3f).background(TileBg)) {
                             AsyncImage(
@@ -197,14 +223,21 @@ fun DetailScreen(
             }
 
             if (viewModel.hasZone("episode-shelves") && contentType == "show") {
-                items(viewModel.seasons, key = { it.number }) { season ->
+                itemsIndexed(viewModel.seasons, key = { _, s -> s.number }) { index, season ->
                     val expanded = expandedSeasonNumber == season.number
-                    Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    // Opaque — see the sticky header's own comment above:
+                    // this is what actually needs to hide behind the header
+                    // once it scrolls up underneath it, not the header
+                    // itself.
+                    Column(modifier = Modifier.fillMaxWidth().background(BgColor).padding(vertical = 6.dp)) {
                         SeasonHeaderTile(
                             title = season.name,
                             count = season.episodes.size,
                             expanded = expanded,
-                            onFocusExpand = { expandedSeasonNumber = season.number },
+                            onFocusExpand = {
+                                expandedSeasonNumber = season.number
+                                scrollBelowHeader(index)
+                            },
                         )
                         if (expanded) {
                             LazyRow(
@@ -214,7 +247,10 @@ fun DetailScreen(
                                 items(season.episodes, key = { it.episodeId }) { ep ->
                                     EpisodeTile(
                                         apiClient, episodeId = ep.episodeId, episodeNumber = ep.episode, title = ep.title,
-                                        onFocus = { expandedSeasonNumber = season.number },
+                                        onFocus = {
+                                            expandedSeasonNumber = season.number
+                                            scrollBelowHeader(index)
+                                        },
                                         onClick = { onPlay("episode", ep.episodeId, 0) },
                                     )
                                 }

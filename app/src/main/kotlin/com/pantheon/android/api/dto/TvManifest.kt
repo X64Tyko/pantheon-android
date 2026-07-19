@@ -15,7 +15,29 @@ data class TvManifest(
     val library: TvZoneSection,
     val detail: TvZoneSection,
     val guide: TvZoneSection,
+    val theme: TvTheme? = null,
 )
+
+// Design tokens generated from hades/src/index.css by hades/scripts/
+// generate-tv-tokens.mjs, served by TvManifestService — "styling comes from
+// the manifest, not a per-client hardcoded color guess" (see that script's
+// own header comment). Null when Kairos couldn't find/parse its token file
+// (e.g. a fresh checkout before the generator has ever run) — callers must
+// have a hardcoded fallback for that case, same as any other optional
+// manifest field.
+data class TvTheme(val version: Int, val tokens: TvThemeTokens)
+
+// Only `colors` is modeled — spacing/radii/fonts/etc. exist in the wire
+// shape too (see the generator script) but nothing on this client consumes
+// them yet; Gson ignores unmapped JSON keys by default, so leaving them out
+// here doesn't lose data for a caller that adds them later, just doesn't
+// parse them now.
+data class TvThemeTokens(val colors: Map<String, TvThemeColor> = emptyMap())
+
+// hex is null for composite values the generator can't reduce to a single
+// color (gradients, multi-layer shadows, `var()` references) — see
+// generate-tv-tokens.mjs's toHex(). Always check for null before using.
+data class TvThemeColor(val css: String, val hex: String? = null)
 
 data class TvHomeSection(val rows: List<TvHomeRow>)
 data class TvZoneSection(val zones: List<TvZone>)

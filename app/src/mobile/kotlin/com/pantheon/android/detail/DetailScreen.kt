@@ -201,23 +201,21 @@ fun DetailScreen(
                 // offset math needed for the lock itself (only for sizing
                 // the backdrop above, which does need it).
                 stickyHeader(key = "header") {
-                    // No wrapping Box/scrim here — the header is taller
-                    // than the fixed-height backdrop above in most cases
-                    // (once genre chips/overview/language rows are in it),
-                    // so it simply spills onto the screen's own BgColor
-                    // below the backdrop's bottom edge; the backdrop's own
-                    // scrim (bounded to HERO_HEIGHT) is all the contrast
-                    // protection the part actually over the image needs.
-                    //
-                    // .background(BgColor) is load-bearing, not decorative:
-                    // once this item locks to the top of the screen, the
+                    // No background here — deliberately transparent. Once
+                    // this item locks to the top of the screen, the
                     // season/episode list below keeps scrolling underneath
-                    // it (that's what "sticky" means) — without an opaque
-                    // background here, the header's own transparent gaps
-                    // (between/around the overview and language rows) let
-                    // that scrolling content show through, visually
-                    // clipping into the header's own text.
-                    Column(modifier = Modifier.fillMaxWidth().background(BgColor)) {
+                    // it (that's what "sticky" means), and while nothing
+                    // opaque has scrolled up that far yet, what's actually
+                    // behind the header's own transparent gaps is the fixed
+                    // hero backdrop — which is exactly what should show
+                    // through (real feedback: "the background...blocks the
+                    // entire banner, the hero banner itself should be in
+                    // front of the seasons and episodes"). The opaque
+                    // backing needed to stop *list content* bleeding through
+                    // once it does scroll up this far now lives on each
+                    // season block below instead, so it only appears once
+                    // there's actually something there to hide.
+                    Column(modifier = Modifier.fillMaxWidth()) {
                             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
                                 Box(modifier = Modifier.width(110.dp).aspectRatio(2f / 3f).background(TileBg)) {
                                     AsyncImage(
@@ -302,7 +300,11 @@ fun DetailScreen(
                 if (viewModel.hasZone("episode-shelves") && contentType == "show") {
                     items(viewModel.seasons, key = { it.number }) { season ->
                         val expanded = season.number in expandedSeasons
-                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        // Opaque — see the sticky header's own comment above:
+                        // this is what actually needs to hide behind the
+                        // header once it scrolls up underneath it, not the
+                        // header itself.
+                        Column(modifier = Modifier.fillMaxWidth().background(BgColor).padding(vertical = 4.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth()
                                     .clickable {
