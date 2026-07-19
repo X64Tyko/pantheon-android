@@ -76,6 +76,40 @@ android {
         }
     }
 
+    // Release signing — same env-var-over-hardcoded-value convention as
+    // ANDROID_VERSION_CODE above. Deliberately conditional on the keystore
+    // path actually being set: a local `assembleRelease` with no keystore
+    // on hand still has to configure cleanly (falls back to an unsigned
+    // release APK, same as this project had before release signing
+    // existed) rather than hard-failing Gradle configuration for every dev
+    // who doesn't have prod signing material on their machine. CI decodes
+    // the keystore from a repo secret into a temp file and sets these vars
+    // — see .github/workflows/build.yml.
+    val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+    signingConfigs {
+        if (releaseKeystorePath != null) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (releaseKeystorePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+            // Minification is a separate concern from "is this signed" —
+            // left off for now since Retrofit/Gson's reflection-based
+            // (de)serialization needs real keep rules to survive R8, not
+            // wired up in this pass.
+            isMinifyEnabled = false
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21

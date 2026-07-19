@@ -9,6 +9,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # contents: write — needed only by the release-publish step below, but
+    # declared at job level since GITHUB_TOKEN permissions can't be
+    # elevated mid-job.
+    permissions:
+      contents: write
     # Read by app/build.gradle.kts's defaultConfig (which also derives
     # versionName from this) — run_number increments on every workflow run
     # (push, PR, or manual dispatch alike), so versionCode is guaranteed
@@ -65,3 +70,54 @@ jobs:
           name: pantheon-amazon-tv-debug
           path: app/build/outputs/apk/amazonTv/debug/*.apk
           retention-days: 30
+
+      # ── Release-signed build + publish — master pushes only (never PRs,
+      # and only once the signing secrets actually exist: a fork of this
+      # repo, or a run before secrets were configured, still builds/tests
+      # cleanly above and just skips everything below). The decoded
+      # keystore only ever lives in RUNNER_TEMP (wiped with the runner at
+      # job end) and is never uploaded as an artifact — only the signed
+      # APKs it produces are. Secret values themselves are never echoed;
+      # GitHub masks any of their exact bytes that *do* end up in log
+      # output regardless, but nothing here relies on that as the only
+      # safeguard.
+      - name: Decode release keystore
+        if: >
+          github.ref == 'refs/heads/master' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "No ANDROID_KEYSTORE_BASE64 secret configured — skipping release signing/publish."
+            exit 0
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build signed release APKs
+        if: env.ANDROID_KEYSTORE_PATH != ''
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleGoogleMobileRelease assembleGoogleTvRelease assembleAmazonMobileRelease assembleAmazonTvRelease --console=plain
+
+      # One rolling "latest" release, republished on every master push —
+      # gives users a single stable URL to always grab the current signed
+      # build from, and since versionCode always increases (see
+      # app/build.gradle.kts), installing it over an existing copy upgrades
+      # in place instead of needing an uninstall/reinstall.
+      - name: Publish latest release
+        if: env.ANDROID_KEYSTORE_PATH != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Pantheon Android (build ${{ github.run_number }})"
+          make_latest: true
+          body: "Automatically built from master @ ${{ github.sha }}. Signed release APKs — install over an existing copy to update in place."
+          files: |
+            app/build/outputs/apk/googleMobile/release/*.apk
+            app/build/outputs/apk/googleTv/release/*.apk
+            app/build/outputs/apk/amazonMobile/release/*.apk
+            app/build/outputs/apk/amazonTv/release/*.apk
