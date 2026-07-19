@@ -1,6 +1,7 @@
 package com.pantheon.android.api
 
 import com.pantheon.android.api.dto.AuthResponse
+import com.pantheon.android.api.dto.AuthUser
 import com.pantheon.android.api.dto.Channel
 import com.pantheon.android.api.dto.ChannelAccessResponse
 import com.pantheon.android.api.dto.Episode
@@ -39,10 +40,21 @@ import retrofit2.http.QueryMap
 // surface, never an admin one).
 
 data class LoginRequest(val username: String, val password: String)
+data class SwitchProfileRequest(val pin: String? = null)
 
 interface KairosApi {
     @POST("api/auth/login")
     suspend fun login(@Body body: LoginRequest): AuthResponse
+
+    // "Who's watching?" picker — mirrors hades/src/api/client.ts's
+    // getProfiles/switchProfile exactly, including switchProfile returning a
+    // brand new token (the active session really does become that profile,
+    // not just a display-name change).
+    @GET("api/auth/profiles")
+    suspend fun getProfiles(): List<AuthUser>
+
+    @POST("api/auth/switch/{id}")
+    suspend fun switchProfile(@Path("id") userId: String, @Body body: SwitchProfileRequest): AuthResponse
 
     @GET("api/tv/manifest")
     suspend fun getTvManifest(): TvManifest

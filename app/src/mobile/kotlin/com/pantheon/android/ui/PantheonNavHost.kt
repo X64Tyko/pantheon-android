@@ -9,6 +9,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.auth.AuthViewModel
+import com.pantheon.android.auth.ProfileSelectScreen
 import com.pantheon.android.auth.TokenStore
 import com.pantheon.android.detail.DetailScreen
 import com.pantheon.android.guide.GuideScreen
@@ -19,6 +20,7 @@ import com.pantheon.android.player.PlayerScreen
 private object Routes {
     const val CONNECT = "connect"
     const val LOGIN = "login"
+    const val PROFILES = "profiles"
     const val HOME = "home"
     const val LIBRARY = "library"
     const val GUIDE = "guide"
@@ -32,7 +34,13 @@ private object Routes {
 fun PantheonNavHost(tokenStore: TokenStore, apiClient: ApiClient) {
     val navController = rememberNavController()
     val authViewModel: AuthViewModel = viewModel(factory = AuthViewModel.factory(tokenStore, apiClient))
-    val startDestination = if (authViewModel.hasStoredSession) Routes.HOME else Routes.CONNECT
+    // A stored session lands on the profile picker, not straight on Home —
+    // see AuthContext.tsx's profileChosen: deliberately in-memory only, so
+    // "who's watching?" re-asks on every cold launch even though the device
+    // itself stays logged in. ProfileSelectScreen itself auto-skips forward
+    // to Home when there's only one profile to pick, mirroring
+    // profiles.length<=1 there.
+    val startDestination = if (authViewModel.hasStoredSession) Routes.PROFILES else Routes.CONNECT
 
     NavHost(navController = navController, startDestination = startDestination) {
         composable(Routes.CONNECT) {
@@ -40,8 +48,18 @@ fun PantheonNavHost(tokenStore: TokenStore, apiClient: ApiClient) {
         }
         composable(Routes.LOGIN) {
             LoginScreen(authViewModel) {
-                navController.navigate(Routes.HOME) { popUpTo(Routes.CONNECT) { inclusive = true } }
+                navController.navigate(Routes.PROFILES) { popUpTo(Routes.CONNECT) { inclusive = true } }
             }
+        }
+        composable(Routes.PROFILES) {
+            ProfileSelectScreen(
+                viewModel = authViewModel,
+                onProfileChosen = { navController.navigate(Routes.HOME) { popUpTo(Routes.PROFILES) { inclusive = true } } },
+                onSignOutCompletely = {
+                    authViewModel.logout()
+                    navController.navigate(Routes.CONNECT) { popUpTo(0) { inclusive = true } }
+                },
+            )
         }
         composable(Routes.HOME) {
             HomeScreen(
@@ -50,6 +68,7 @@ fun PantheonNavHost(tokenStore: TokenStore, apiClient: ApiClient) {
                 onPlay = { kind, id, positionMs -> navController.navigate(Routes.player(kind, id, positionMs)) },
                 onNavigateLibrary = { navController.navigate(Routes.LIBRARY) },
                 onNavigateGuide = { navController.navigate(Routes.GUIDE) },
+                onSwitchProfile = { navController.navigate(Routes.PROFILES) },
             )
         }
         composable(Routes.GUIDE) {

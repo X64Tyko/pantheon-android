@@ -58,6 +58,7 @@ fun HomeScreen(
     onPlay: (kind: String, id: String, positionMs: Long) -> Unit,
     onNavigateLibrary: () -> Unit,
     onNavigateGuide: () -> Unit,
+    onSwitchProfile: () -> Unit,
 ) {
     val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(apiClient))
     val scope = rememberCoroutineScope()
@@ -103,6 +104,8 @@ fun HomeScreen(
             item {
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 8.dp)) {
                     FocusableTextButton(text = "Library", onClick = onNavigateLibrary)
+                    Box(modifier = Modifier.weight(1f))
+                    FocusableTextButton(text = "👤 Switch Profile", onClick = onSwitchProfile)
                 }
             }
             items(viewModel.rows.filter { it.type != "hero" }, key = { it.id }) { row ->

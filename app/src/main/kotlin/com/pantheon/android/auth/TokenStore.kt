@@ -36,8 +36,19 @@ class TokenStore(context: Context) {
         get() = prefs.getString(KEY_SERVER_URL, null)
         set(value) = prefs.edit().putString(KEY_SERVER_URL, value).apply()
 
+    // The profile (user_id) the current token actually authenticates as —
+    // set on both login and switchProfile success. Persisted (unlike
+    // AuthContext.tsx's in-memory-only profileChosen — see
+    // ProfileSelectScreen's own comment on why this app still re-shows the
+    // picker every cold launch despite persisting this) purely so a
+    // relaunched app can label the right tile "(you)" before the user picks
+    // anything.
+    var currentUserId: String?
+        get() = prefs.getString(KEY_CURRENT_USER_ID, null)
+        set(value) = prefs.edit().putString(KEY_CURRENT_USER_ID, value).apply()
+
     fun clear() {
-        prefs.edit().remove(KEY_TOKEN).apply()
+        prefs.edit().remove(KEY_TOKEN).remove(KEY_CURRENT_USER_ID).apply()
         // serverUrl deliberately survives a clear() — same behavior as
         // AuthContext.tsx's ClearSession(false)/logout distinction: losing
         // the token shouldn't force re-typing the server address too.
@@ -46,5 +57,6 @@ class TokenStore(context: Context) {
     private companion object {
         const val KEY_TOKEN = "token"
         const val KEY_SERVER_URL = "server_url"
+        const val KEY_CURRENT_USER_ID = "current_user_id"
     }
 }

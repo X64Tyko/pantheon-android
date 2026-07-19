@@ -70,8 +70,14 @@ data class AuthResponse(
     val user: AuthUser,
 )
 
+// Mirrors hades/src/api/types.ts's User, trimmed to what the profile picker
+// (GET /api/auth/profiles) actually renders — restricted/has_pin drive the
+// picker's badges and PIN-vs-password gating, see ProfileSelectScreen's own
+// comment for the exact rules.
 data class AuthUser(
     @SerializedName("user_id") val userId: String,
     val username: String,
     val role: String,
+    val restricted: Boolean = false,
+    @SerializedName("has_pin") val hasPin: Boolean = false,
 )

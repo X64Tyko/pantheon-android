@@ -60,6 +60,7 @@ fun HomeScreen(
     onPlay: (kind: String, id: String, positionMs: Long) -> Unit,
     onNavigateLibrary: () -> Unit,
     onNavigateGuide: () -> Unit,
+    onSwitchProfile: () -> Unit,
 ) {
     val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(apiClient))
     val scope = rememberCoroutineScope()
@@ -125,6 +126,8 @@ fun HomeScreen(
                     if (viewModel.rows.any { it.type == "guide" }) {
                         OutlinedButton(onClick = onNavigateGuide) { Text("📺  Guide") }
                     }
+                    Box(modifier = Modifier.weight(1f))
+                    OutlinedButton(onClick = onSwitchProfile) { Text("👤") }
                 }
             }
             items(viewModel.rows.filter { it.type != "hero" && it.type != "guide" }, key = { it.id }) { row ->
