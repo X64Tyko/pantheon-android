@@ -1,5 +1,6 @@
 package com.pantheon.android.library
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -89,6 +90,29 @@ fun LibraryScreen(
     val focusManager = LocalFocusManager.current
     var filtersOpen by remember { mutableStateOf(false) }
 
+    // Hoisted out of the search-bar zone block below (rather than local to
+    // it) so the BackHandler beneath it can reach them too.
+    var searchEditing by remember { mutableStateOf(false) }
+    var searchButtonFocused by remember { mutableStateOf(false) }
+    val searchFocusRequester = remember { FocusRequester() }
+    val searchHasFocus = searchEditing || searchButtonFocused
+
+    // First Back press while browsing anywhere else on this screen (a grid
+    // tile, the Filters button, ...) snaps D-pad focus to the search bar
+    // instead of immediately leaving Library — real feedback: "Pressing the
+    // back button while browsing the library should snap to the search bar
+    // before going back through menus." Only once focus is already on the
+    // search bar does a further Back fall through to actual navigation
+    // (this handler disables itself, letting the NavHost's own back
+    // handling take over). Doesn't fight the search field's own Back
+    // handling while actively editing (Key.Back there collapses edit mode
+    // via onPreviewKeyEvent, consumed before it ever reaches this
+    // dispatcher-level handler) or TvFilterPanel's Back-to-close (its
+    // Dialog owns a separate window/back-dispatcher scope entirely).
+    BackHandler(enabled = viewModel.hasZone("search-bar") && !searchHasFocus) {
+        searchFocusRequester.requestFocus()
+    }
+
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }.collect { lastVisible ->
             val loadedCount = viewModel.shows.size + viewModel.movies.size
@@ -139,8 +163,6 @@ fun LibraryScreen(
             }
 
             if (viewModel.hasZone("search-bar")) {
-                var searchEditing by remember { mutableStateOf(false) }
-                val searchFocusRequester = remember { FocusRequester() }
                 if (searchEditing) {
                     LaunchedEffect(Unit) { searchFocusRequester.requestFocus() }
                     // A plain Material3 TextField swallows DPAD up/down as cursor
@@ -183,7 +205,9 @@ fun LibraryScreen(
                     // input never has.
                     Surface(
                         onClick = { searchEditing = true },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp)
+                            .focusRequester(searchFocusRequester)
+                            .onFocusChanged { searchButtonFocused = it.isFocused },
                         colors = ClickableSurfaceDefaults.colors(
                             containerColor = TileBg,
                             focusedContainerColor = Color(0xFF2E2F45),
@@ -220,7 +244,17 @@ fun LibraryScreen(
                             )
                         }
                         if (viewModel.loadingMore) {
-                            item(span = { GridItemSpan(maxLineSpan) }) {
+                            // Explicit key — mixing a keyless trailing item
+                            // into a grid whose real items all carry keys is
+                            // what let this row's presence toggling (as
+                            // loadingMore flips during pagination) desync
+                            // the grid's line-index cache from the actual
+                            // item list, visually offsetting every tile by a
+                            // full row (real feedback: "scrolling the
+                            // android library occasionally offsets all
+                            // tiles by 3" — exactly one row on this screen's
+                            // fixed column count).
+                            item(key = "loading-more", span = { GridItemSpan(maxLineSpan) }) {
                                 Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
                                     CircularProgressIndicator(color = GoldColor)
                                 }

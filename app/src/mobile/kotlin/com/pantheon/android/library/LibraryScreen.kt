@@ -147,7 +147,17 @@ fun LibraryScreen(
                             LibraryTile(apiClient, item, onClick = { onOpenDetail(item.contentType, item.id) })
                         }
                         if (viewModel.loadingMore) {
-                            item(span = { GridItemSpan(maxLineSpan) }) {
+                            // Explicit key — mixing a keyless trailing item
+                            // into a grid whose real items all carry keys is
+                            // what let this row's presence toggling (as
+                            // loadingMore flips during pagination) desync
+                            // the grid's line-index cache from the actual
+                            // item list, visually offsetting every tile by a
+                            // full row (real feedback: "scrolling the
+                            // android library occasionally offsets all
+                            // tiles by 3" — exactly one row of this screen's
+                            // 3-column grid).
+                            item(key = "loading-more", span = { GridItemSpan(maxLineSpan) }) {
                                 Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
                                     CircularProgressIndicator(color = GoldColor)
                                 }
