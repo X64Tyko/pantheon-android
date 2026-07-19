@@ -199,8 +199,8 @@ fun TvChip(label: String, active: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun TvTextButton(text: String, onClick: () -> Unit) {
-    Surface(onClick = onClick, colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent)) {
+fun TvTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(onClick = onClick, modifier = modifier, colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent)) {
         Text(text, color = Color.White, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
     }
 }

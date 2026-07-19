@@ -24,9 +24,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.pantheon.android.api.dto.LibraryWithSource
@@ -46,6 +50,16 @@ private val TileBorder = Color(0xFF2E2F45)
 // TvChip row instead of a popup DropdownMenu — see LibraryScreen.kt's
 // comment on why: nested popup focus scopes don't play well with D-pad
 // focus-search in tv-foundation 1.0.0.
+//
+// Real on-device bug: an earlier version rendered this as a plain Box
+// instead of a Dialog. Since it was declared *before* LibraryScreen's own
+// main Box in composition order, Compose painted it underneath that
+// opaque, fillMaxSize screen content — it wasn't a focus problem, it
+// literally never became visible at all, and D-pad input kept landing on
+// whatever was focused on the Library screen underneath. A Dialog renders
+// in its own window, always on top regardless of composition order, and
+// becomes the active window for D-pad/focus purposes — the same reason
+// the mobile flavor's FilterPanel already uses one.
 @Composable
 fun TvFilterPanel(
     availableFields: List<String>,
@@ -56,6 +70,10 @@ fun TvFilterPanel(
     fetchValuesFor: suspend (String) -> List<String>,
     onClose: () -> Unit,
 ) {
+    val doneFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { doneFocusRequester.requestFocus() }
+
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
@@ -63,7 +81,7 @@ fun TvFilterPanel(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("Filters", style = MaterialTheme.typography.headlineSmall, color = Color.White, modifier = Modifier.weight(1f))
-                TvTextButton(text = "Done", onClick = onClose)
+                TvTextButton(text = "Done", onClick = onClose, modifier = Modifier.focusRequester(doneFocusRequester))
             }
 
             LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 40.dp)) {
@@ -134,6 +152,7 @@ fun TvFilterPanel(
                 }
             }
         }
+    }
     }
 }
 
