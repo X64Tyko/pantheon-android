@@ -21,6 +21,30 @@ class AuthViewModel(
     private val apiClient: ApiClient,
 ) : ViewModel() {
 
+    init {
+        // Covers the cold-launch-with-a-stored-session case, which bypasses
+        // login()/switchProfile() entirely (see PantheonNavHost's own
+        // startDestination check) — without this, a client that was already
+        // logged in before this Hephaestus instance's most recent restart
+        // would never re-declare, and every VOD start would silently fall
+        // back to the conservative allowlist until its next real login.
+        if (hasStoredSession) declareCapabilities()
+    }
+
+    // Fire-and-forget, best-effort — see DeviceCodecCapabilities' own
+    // comment for what this declares and why, and ClientCapabilities.h
+    // (hephaestus) for why "once per session" (login/profile-switch/app-
+    // launch), not literally once ever: the server-side cache is in-memory
+    // and gets wiped on every Hephaestus restart, which happens on every
+    // image redeploy. A failed declare here just means this session's VOD
+    // starts fall back to the conservative h264/aac allowlist, same as
+    // before this feature existed — never worth blocking login/switch on.
+    private fun declareCapabilities() {
+        viewModelScope.launch {
+            runCatching { apiClient.service.declareClientCapabilities(DeviceCodecCapabilities.detect()) }
+        }
+    }
+
     var serverUrlInput by mutableStateOf(tokenStore.serverUrl ?: "")
         private set
     var username by mutableStateOf("")
@@ -78,6 +102,7 @@ class AuthViewModel(
                 val response = apiClient.service.switchProfile(user.userId, SwitchProfileRequest(pin))
                 tokenStore.token = response.token
                 tokenStore.currentUserId = response.user.userId
+                declareCapabilities()
                 onSuccess()
             } catch (e: Exception) {
                 pickerError = "Failed to switch profile: ${e.message ?: "unknown error"}"
@@ -100,6 +125,7 @@ class AuthViewModel(
                 val response = apiClient.service.login(LoginRequest(targetUsername, targetPassword))
                 tokenStore.token = response.token
                 tokenStore.currentUserId = response.user.userId
+                declareCapabilities()
                 onSuccess()
             } catch (e: Exception) {
                 pickerError = "Sign in failed: ${e.message ?: "unknown error"}"
@@ -131,6 +157,7 @@ class AuthViewModel(
                 val response = apiClient.service.login(LoginRequest(username, password))
                 tokenStore.token = response.token
                 tokenStore.currentUserId = response.user.userId
+                declareCapabilities()
                 onSuccess()
             } catch (e: Exception) {
                 errorMessage = "Sign in failed: ${e.message ?: "unknown error"}"
@@ -140,8 +167,18 @@ class AuthViewModel(
         }
     }
 
+    // The forget call has to fire while the token is still valid (it's how
+    // Hephaestus knows which cache entry to remove — see
+    // ClientCapabilities.h), so it's launched before tokenStore.clear()
+    // runs, not after. clear() itself stays outside the runCatching: a
+    // failed/timed-out forget call must never leave the device stuck
+    // looking logged-in — worst case the entry just lingers server-side
+    // until ClientCapabilityCache's own idle-based pruning drops it.
     fun logout() {
-        tokenStore.clear()
+        viewModelScope.launch {
+            runCatching { apiClient.service.forgetClientCapabilities() }
+            tokenStore.clear()
+        }
     }
 
     companion object {

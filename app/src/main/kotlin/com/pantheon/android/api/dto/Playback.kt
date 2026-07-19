@@ -34,3 +34,15 @@ data class WatchProgressBody(
     @SerializedName("duration_ms") val durationMs: Long,
     val completed: Boolean? = null,
 )
+
+// POST /stream/client-capabilities -- this device's real decode capability
+// (see com.pantheon.android.auth.DeviceCodecCapabilities), keyed server-side
+// by bearer token so VodSession's direct-play decision (hephaestus/src/
+// stream/VodSession.cpp's isDirectPlayable) can check a source file's
+// actual codecs against what *this* client can really play instead of a
+// fixed h264/aac allowlist. ffprobe codec_name values, not MIME types —
+// see DeviceCodecCapabilities' own mapping.
+data class ClientCapabilitiesRequest(
+    @SerializedName("video_codecs") val videoCodecs: List<String>,
+    @SerializedName("audio_codecs") val audioCodecs: List<String>,
+)

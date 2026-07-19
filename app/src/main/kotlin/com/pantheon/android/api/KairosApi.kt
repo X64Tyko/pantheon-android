@@ -4,6 +4,7 @@ import com.pantheon.android.api.dto.AuthResponse
 import com.pantheon.android.api.dto.AuthUser
 import com.pantheon.android.api.dto.Channel
 import com.pantheon.android.api.dto.ChannelAccessResponse
+import com.pantheon.android.api.dto.ClientCapabilitiesRequest
 import com.pantheon.android.api.dto.Episode
 import com.pantheon.android.api.dto.EpgProgram
 import com.pantheon.android.api.dto.FilterValuesResponse
@@ -26,6 +27,7 @@ import com.pantheon.android.api.dto.WatchProgress
 import com.pantheon.android.api.dto.WatchProgressBody
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.PUT
 import retrofit2.http.Path
@@ -125,6 +127,19 @@ interface KairosApi {
 
     @POST("stream/vod/{id}/stop")
     suspend fun stopVodPlayback(@Path("id") sessionId: String): Response<Unit>
+
+    // Declares this device's real decode capability once per session
+    // (login/profile-switch/app-launch — see AuthViewModel's own comment on
+    // why "once per session," not literally once ever), so VodSession's
+    // direct-play decision can check a source file's actual codecs against
+    // what this specific client can really play instead of a fixed
+    // h264/aac allowlist. forgetClientCapabilities is the logout-time
+    // counterpart — see hephaestus/src/stream/ClientCapabilities.h.
+    @POST("stream/client-capabilities")
+    suspend fun declareClientCapabilities(@Body body: ClientCapabilitiesRequest): Response<Unit>
+
+    @DELETE("stream/client-capabilities")
+    suspend fun forgetClientCapabilities(): Response<Unit>
 
     @PUT("api/watch-progress/{contentType}/{id}")
     suspend fun putWatchProgress(@Path("contentType") contentType: String, @Path("id") id: String, @Body body: WatchProgressBody): Response<Unit>
