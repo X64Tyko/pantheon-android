@@ -6,6 +6,18 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Two master pushes close together otherwise run their full builds
+# concurrently and race to publish the rolling "latest" release (observed
+# directly: an older commit's run finished after a newer commit's run and
+# clobbered it, leaving "latest" pointing at stale-er code) — cancelling a
+# still-running build for the same branch the moment a newer push supersedes
+# it means whichever run actually publishes is always the newest commit's.
+# PRs still get their own independent group (per-ref) so this never cancels
+# unrelated concurrent PR builds.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
