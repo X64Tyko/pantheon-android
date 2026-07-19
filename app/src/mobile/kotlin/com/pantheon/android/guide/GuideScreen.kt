@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -52,7 +54,7 @@ fun GuideScreen(
 
     Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
         Column(modifier = Modifier.fillMaxSize()) {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
                 TextButton(onClick = onBack) { Text("← Back", color = Color.White) }
                 Text("Guide", style = MaterialTheme.typography.headlineSmall, color = Color.White, modifier = Modifier.padding(start = 8.dp))
             }
@@ -62,7 +64,7 @@ fun GuideScreen(
             } else if (viewModel.errorMessage != null) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(viewModel.errorMessage!!, color = TextDim) }
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(modifier = Modifier.fillMaxSize().navigationBarsPadding()) {
                     items(viewModel.channels, key = { it.channelId }) { ch ->
                         ChannelRow(apiClient, ch, viewModel.currentProgramByChannel[ch.channelId]?.title, onClick = { onWatchChannel(ch.channelId) })
                     }

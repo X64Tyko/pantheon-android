@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -70,14 +72,14 @@ fun FilterPanel(
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(modifier = Modifier.fillMaxSize().background(BgColor)) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("Filters", style = MaterialTheme.typography.headlineSmall, color = Color.White, modifier = Modifier.weight(1f))
                 TextButton(onClick = onClose) { Text("Done", color = GoldColor) }
             }
 
-            LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 20.dp)) {
+            LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding()) {
                 if (libraries.isNotEmpty()) {
                     item {
                         Text("Libraries", color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))

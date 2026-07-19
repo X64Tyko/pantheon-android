@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -101,7 +103,7 @@ fun HomeScreen(
             return@Surface
         }
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(modifier = Modifier.fillMaxSize().navigationBarsPadding()) {
             item {
                 HeroZone(
                     apiClient = apiClient,
@@ -119,7 +121,13 @@ fun HomeScreen(
                 // "guide" row rather than hardcoded, so a manifest that
                 // omits Guide entirely still hides the button.
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    // statusBarsPadding here is insurance for the loading/
+                    // no-hero-row state, where HeroZone renders nothing and
+                    // this row becomes the first thing at y=0 — with a hero
+                    // present (usual case) it's already well clear of the
+                    // status bar, so this is a no-visible-difference safety
+                    // net rather than a real layout change in that path.
+                    modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     OutlinedButton(onClick = onNavigateLibrary) { Text("Library") }

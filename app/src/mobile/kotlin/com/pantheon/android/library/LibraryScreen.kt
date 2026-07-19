@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -91,7 +93,7 @@ fun LibraryScreen(
     Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(onClick = onBack) { Text("← Back", color = Color.White) }
@@ -121,7 +123,7 @@ fun LibraryScreen(
                 )
             }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp)) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp).navigationBarsPadding()) {
                 if (viewModel.loading) {
                     CircularProgressIndicator(color = GoldColor, modifier = Modifier.align(Alignment.Center))
                 } else {

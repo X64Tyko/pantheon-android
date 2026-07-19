@@ -61,11 +61,14 @@ fun GuideScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxWidth().height(340.dp)) {
                 PreviewPlayerView(manifestUrl = viewModel.previewManifestUrl, modifier = Modifier.fillMaxSize())
-                TvTextButton(text = "← Back", onClick = onBack, modifier = Modifier.padding(24.dp))
+                // 40dp matches the safe-area margin used everywhere else on
+                // TV — 24dp here was an outlier tight enough to risk sitting
+                // in overscan territory on some TVs.
+                TvTextButton(text = "← Back", onClick = onBack, modifier = Modifier.padding(40.dp))
 
                 val focusedChannel = viewModel.channels.find { it.channelId == viewModel.selectedChannelId }
                 if (focusedChannel != null) {
-                    Column(modifier = Modifier.align(Alignment.BottomStart).padding(24.dp)) {
+                    Column(modifier = Modifier.align(Alignment.BottomStart).padding(40.dp)) {
                         Text("${focusedChannel.number}  ${focusedChannel.name}", color = Color.White, style = MaterialTheme.typography.headlineSmall)
                         val nowTitle = viewModel.currentProgramByChannel[focusedChannel.channelId]?.title
                         if (nowTitle != null) Text(nowTitle, color = TextDim)

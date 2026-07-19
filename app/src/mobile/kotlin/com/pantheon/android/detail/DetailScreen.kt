@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -26,7 +27,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,7 +39,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,22 +56,36 @@ private val TileBg = Color(0xFF232438)
 
 // Mobile height/overlap for the fixed-backdrop + sticky-header layering
 // below — same *behavior* as hades/src/tv/TvLibraryDetail.tsx's
-// HERO_HEIGHT_CSS/HERO_OVERLAP (a genuinely fixed backdrop layer that
-// shrinks to the locked header's measured height once collapsed, with the
-// header itself starting overlapped over the backdrop's bottom edge and
-// scrolling up to lock at the top), just resized for a phone screen rather
-// than a TV's max(36vh, 320px)/40px.
+// HERO_HEIGHT_CSS/HERO_OVERLAP (the header starts overlapped over the
+// backdrop's bottom edge and scrolls up to lock at the top), just resized
+// for a phone screen rather than a TV's max(36vh, 320px)/40px.
+//
+// Deliberately NOT resizing the backdrop to match the header's own height
+// once locked (an earlier version of this screen did) — the header is
+// almost always taller than the backdrop once genre chips/overview/
+// language rows are in it, so "match the header" meant the backdrop kept
+// growing well past its own image, dragging its scrim across content that
+// was already sitting on plain background and had no need of one (real
+// feedback: "the scrim behind details covers the whole banner instead of
+// just the important readability sections"), and depended on
+// onGloballyPositioned's one-frame-late measurement landing before the
+// scroll-driven collapse state changed, which could visibly desync from
+// season content scrolling into view (real feedback: "season/episode lists
+// are... over the banner"). Keeping the backdrop at a genuinely fixed
+// height sidesteps both: the header is simply taller than it and spills
+// onto plain background below it, same as any normal overlapping-hero
+// pattern.
 private val HERO_HEIGHT = 220.dp
 private val HERO_OVERLAP = 26.dp
 
-// Header-local scrim (see stickyHeader's own comment on why it needs one
-// independent of the backdrop's own gradient) and title text shadow —
-// named constants rather than literals inline in the composable, same
-// convention as the colors/sizing above.
-private val HeaderScrimBrush = Brush.verticalGradient(
-    0f to Color.Black.copy(alpha = 0.25f),
-    0.5f to Color.Black.copy(alpha = 0.55f),
-    1f to Color.Black.copy(alpha = 0.7f),
+// Backdrop's own scrim (bounded to HERO_HEIGHT — it never needs to cover
+// more than the image itself) and title text shadow — named constants
+// rather than literals inline in the composable, same convention as the
+// colors/sizing above.
+private val BackdropScrimBrush = Brush.verticalGradient(
+    0f to Color.Transparent,
+    0.5f to Color.Black.copy(alpha = 0.35f),
+    1f to Color.Black.copy(alpha = 0.75f),
 )
 private val TitleTextShadow = Shadow(color = Color.Black, offset = Offset(0f, 2f), blurRadius = 8f)
 
@@ -110,6 +123,11 @@ fun DetailScreen(
     }
     var overviewDialogOpen by remember { mutableStateOf(false) }
     var languagesDialogOpen by remember { mutableStateOf(false) }
+    // Touch analog of EpisodeShelf.tsx's hover/focus-driven expand — there's
+    // no hover on touch, so each season is an independent tap-to-expand
+    // accordion tile instead, collapsed by default (item: "Seasons don't
+    // collapse like in the web version").
+    var expandedSeasons by remember { mutableStateOf(setOf<Int>()) }
 
     fun goPlay() {
         scope.launch {
@@ -118,20 +136,13 @@ fun DetailScreen(
         }
     }
 
-    // Same measured-collapse math as useScrollCollapse/useElementHeight on
-    // web: the backdrop starts at HERO_HEIGHT, and once the header (a
-    // Compose stickyHeader — same locking behavior as CSS position:sticky)
-    // has scrolled to the top and locked there, shrinks to exactly the
-    // header's own rendered height instead of staying taller than the
-    // content it's now just a backdrop plate behind.
-    var headerHeightPx by remember { mutableStateOf(0) }
+    // Hero spacer — the sticky header's natural (unstuck) starting
+    // position, overlapping the fixed backdrop's bottom edge by
+    // HERO_OVERLAP. See the constants' own comment for why the backdrop
+    // itself no longer resizes.
     val heroHeightPx = with(density) { HERO_HEIGHT.toPx() }
     val heroOverlapPx = with(density) { HERO_OVERLAP.toPx() }
     val heroSpacerPx = (heroHeightPx - heroOverlapPx).coerceAtLeast(0f)
-    val collapsed by remember {
-        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset >= heroSpacerPx }
-    }
-    val backdropHeight = if (collapsed && headerHeightPx > 0) with(density) { headerHeightPx.toDp() } else HERO_HEIGHT
 
     Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
         if (viewModel.loading) {
@@ -155,12 +166,15 @@ fun DetailScreen(
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
-            // Fixed backdrop layer — never part of the scrolling list, so it
-            // can't slide fully off screen the way a plain LazyColumn item
-            // would (the item 7 bug). Retargets to the selected episode's
-            // still, same as web's backdropUrl.
+            // Fixed backdrop layer, genuinely fixed height (see the
+            // constants' own comment) — never part of the scrolling list,
+            // so it can't slide fully off screen the way a plain LazyColumn
+            // item would (item 7's original bug), and never grows past its
+            // own image, so its scrim never darkens content that isn't
+            // actually over it. Retargets to the selected episode's still,
+            // same as web's backdropUrl.
             if (viewModel.hasZone("hero-backdrop")) {
-                Box(modifier = Modifier.fillMaxWidth().height(backdropHeight).align(Alignment.TopStart)) {
+                Box(modifier = Modifier.fillMaxWidth().height(HERO_HEIGHT).align(Alignment.TopStart)) {
                     val backdropUrl = if (selectedEpisode != null) {
                         selectedEpisode.thumb?.let { apiClient.mediaUrl("/api/episodes/${selectedEpisode.episodeId}/thumb") }
                     } else {
@@ -172,7 +186,7 @@ fun DetailScreen(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize().background(TileBg),
                     )
-                    Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Transparent, 1f to BgColor)))
+                    Box(modifier = Modifier.fillMaxSize().background(BackdropScrimBrush))
                 }
             }
 
@@ -187,23 +201,14 @@ fun DetailScreen(
                 // offset math needed for the lock itself (only for sizing
                 // the backdrop above, which does need it).
                 stickyHeader(key = "header") {
-                    Box(
-                        modifier = Modifier.fillMaxWidth()
-                            .onGloballyPositioned { headerHeightPx = it.size.height },
-                    ) {
-                        // Header-local scrim — the backdrop's own bottom-fade
-                        // gradient is sized to the *unscrolled* hero and
-                        // stops being underneath the header at all once
-                        // locked/collapsed (the header's own height can
-                        // exceed what the backdrop's gradient was tuned
-                        // for), so title/meta/overview text was reading
-                        // straight off the raw image in that state — this
-                        // scrim is part of the header itself, so it holds
-                        // regardless of scroll/collapse state or what's
-                        // actually in the backdrop image.
-                        Box(modifier = Modifier.matchParentSize().background(HeaderScrimBrush))
-
-                        Column(modifier = Modifier.fillMaxWidth()) {
+                    // No wrapping Box/scrim here — the header is taller
+                    // than the fixed-height backdrop above in most cases
+                    // (once genre chips/overview/language rows are in it),
+                    // so it simply spills onto the screen's own BgColor
+                    // below the backdrop's bottom edge; the backdrop's own
+                    // scrim (bounded to HERO_HEIGHT) is all the contrast
+                    // protection the part actually over the image needs.
+                    Column(modifier = Modifier.fillMaxWidth()) {
                             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
                                 Box(modifier = Modifier.width(110.dp).aspectRatio(2f / 3f).background(TileBg)) {
                                     AsyncImage(
@@ -282,14 +287,26 @@ fun DetailScreen(
                                     }
                                 }
                             }
-                        }
                     }
                 }
 
                 if (viewModel.hasZone("episode-shelves") && contentType == "show") {
                     items(viewModel.seasons, key = { it.number }) { season ->
-                        Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                            Text(season.name, style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+                        val expanded = season.number in expandedSeasons
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth()
+                                    .clickable {
+                                        expandedSeasons = if (expanded) expandedSeasons - season.number else expandedSeasons + season.number
+                                    }
+                                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(season.name, style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.weight(1f))
+                                Text("${season.episodes.size} episode${if (season.episodes.size == 1) "" else "s"}", color = TextDim, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 10.dp))
+                                Text(if (expanded) "⌄" else "›", color = TextDim, style = MaterialTheme.typography.titleMedium)
+                            }
+                            if (!expanded) return@Column
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 20.dp),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -339,7 +356,7 @@ fun DetailScreen(
                 item(key = "bottom-spacer") { Spacer(modifier = Modifier.height(32.dp)) }
             }
 
-            TextButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) { Text("← Back", color = Color.White) }
+            TextButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)) { Text("← Back", color = Color.White) }
         }
     }
 }
