@@ -111,15 +111,24 @@ fun PlayerScreen(
     // Periodic watch-progress ping while playing, plus a final flush on
     // leaving — mirrors PlayerPage.tsx's PROGRESS_PING_MS interval effect,
     // including the flush-on-cleanup half (its own effect return function).
+    // Gated on viewModel.durationMs (the server-known, ffprobe-derived
+    // duration from VodStartResponse), not exoPlayer.duration — a
+    // transcoded (non-direct-play) session's HLS playlist is "event" type
+    // (see VodSession.cpp's buildVodArgs comment), which doesn't get
+    // #EXT-X-ENDLIST until the *entire* transcode finishes server-side, so
+    // ExoPlayer's own duration can stay unset for the whole viewing
+    // session. reportProgress() already no-ops via its own durationMs
+    // check when this is called too early, so no need to duplicate that
+    // guard out here.
     LaunchedEffect(viewModel) {
         while (true) {
             delay(PROGRESS_PING_MS)
-            if (exoPlayer.duration > 0) viewModel.reportProgress(exoPlayer.currentPosition)
+            viewModel.reportProgress(exoPlayer.currentPosition)
         }
     }
     DisposableEffect(viewModel) {
         onDispose {
-            if (exoPlayer.duration > 0) viewModel.reportProgress(exoPlayer.currentPosition)
+            viewModel.reportProgress(exoPlayer.currentPosition)
         }
     }
 
@@ -151,11 +160,16 @@ fun PlayerScreen(
         }
     }
 
+    // viewModel.durationMs, not exoPlayer.duration — see the progress-ping
+    // effect's own comment above for why the latter can't be trusted for a
+    // transcoded session until the whole file has finished encoding
+    // server-side, which is exactly the state this overlay needs to appear
+    // *before* (the last 30s of playback).
     val showUpNext by remember {
         derivedStateOf {
             val next = viewModel.nextEpisode
-            next != null && !viewModel.upNextDismissed && exoPlayer.duration > 0 &&
-                (exoPlayer.duration - positionMs) < UP_NEXT_FALLBACK_WINDOW_MS
+            next != null && !viewModel.upNextDismissed && viewModel.durationMs > 0 &&
+                (viewModel.durationMs - positionMs) < UP_NEXT_FALLBACK_WINDOW_MS
         }
     }
 
