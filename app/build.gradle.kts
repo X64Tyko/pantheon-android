@@ -18,8 +18,8 @@ android {
     // continuing the previous minor version's build count (e.g. jumping
     // straight to "0.2.150" instead of "0.2.1"). versionCode itself is
     // never reset this way — see its own comment below for why.
-    val versionMajorMinor = "0.1"
-    val versionBaseBuild = 0
+    val versionMajorMinor = "0.2"
+    val versionBaseBuild = 16
 
     defaultConfig {
         applicationId = "com.pantheon.android"
