@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.pantheon.android.api.ApiClient
+import com.pantheon.android.api.dto.NextEpisode
 import com.pantheon.android.api.dto.VodStartRequest
 import com.pantheon.android.api.dto.WatchProgressBody
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -18,10 +19,19 @@ import kotlinx.coroutines.launch
 // Kotlin counterpart of hades/src/player/usePlaybackSession.ts, trimmed to
 // this pass's scope: no track-switch/reload (audio/subtitle track picker is
 // a real follow-up, not built this round — media3-ui's PlayerView still
-// exposes whatever the manifest itself carries as embedded/default tracks),
-// no Up-Next auto-advance. Resume position, live-vs-VOD session lifecycle,
-// and periodic watch-progress reporting are the real behaviors this needs
-// to get right, and does.
+// exposes whatever the manifest itself carries as embedded/default tracks).
+// Resume position, live-vs-VOD session lifecycle, periodic watch-progress
+// reporting, and Up Next auto-advance are the real behaviors this needs to
+// get right, and does.
+//
+// Deliberately no chapter-based intro/credits detection the way
+// PlayerPage.tsx's showUpNext also can trigger on (there's no chapters
+// fetch built on this flavor at all) — this always uses that logic's
+// fallback branch: the last UP_NEXT_FALLBACK_WINDOW_MS of the episode,
+// same window PlayerPage.tsx falls back to for any episode with no chapter
+// data. Same end-user experience for the common case, without needing the
+// whole chapters/credits-chapter-type infrastructure Android has no other
+// use for yet.
 class PlayerViewModel(
     private val apiClient: ApiClient,
     private val kind: String, // "movie" | "episode" | "channel"
@@ -40,6 +50,10 @@ class PlayerViewModel(
     var title by mutableStateOf("")
         private set
     var durationMs by mutableStateOf(0L)
+        private set
+    var nextEpisode by mutableStateOf<NextEpisode?>(null)
+        private set
+    var upNextDismissed by mutableStateOf(false)
         private set
 
     val isLive: Boolean get() = kind == "channel"
@@ -102,8 +116,17 @@ class PlayerViewModel(
                 errorMessage = e.message ?: "Failed to start playback"
             }
             loading = false
+
+            // Fire-and-forget, doesn't gate loading=false above on it — a
+            // slow/failed next-episode lookup shouldn't delay playback
+            // actually starting, it just means no Up Next overlay this time.
+            if (kind == "episode") {
+                nextEpisode = runCatching { apiClient.service.getNextEpisode(contentId) }.getOrNull()
+            }
         }
     }
+
+    fun dismissUpNext() { upNextDismissed = true }
 
     // Called every PROGRESS_PING_MS by the player screen's own timer, fed
     // the player's raw (manifest-relative) position — mirrors PlayerPage.tsx's

@@ -116,6 +116,17 @@ fun PantheonNavHost(tokenStore: TokenStore, apiClient: ApiClient) {
                 contentId = id,
                 initialPositionMs = positionMs,
                 onBack = { navController.popBackStack() },
+                // popUpTo + inclusive rather than a plain navigate() —
+                // this is a continuation of the same viewing session, not a
+                // new navigation the viewer chose (mirrors PlayerPage.tsx's
+                // navigate(..., { replace: true }) for the same reason):
+                // Back after an auto-advance should leave the player
+                // entirely, not step into the just-finished episode.
+                onAdvanceToNext = { nextId ->
+                    navController.navigate(Routes.player("episode", nextId, 0)) {
+                        popUpTo(Routes.PLAYER) { inclusive = true }
+                    }
+                },
             )
         }
     }

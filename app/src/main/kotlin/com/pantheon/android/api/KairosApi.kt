@@ -11,6 +11,7 @@ import com.pantheon.android.api.dto.LibraryWithSource
 import com.pantheon.android.api.dto.MediaLanguages
 import com.pantheon.android.api.dto.Movie
 import com.pantheon.android.api.dto.MovieDetail
+import com.pantheon.android.api.dto.NextEpisode
 import com.pantheon.android.api.dto.PagedResult
 import com.pantheon.android.api.dto.PreviewStartRequest
 import com.pantheon.android.api.dto.PreviewStartResponse
@@ -87,6 +88,9 @@ interface KairosApi {
 
     @GET("api/shows/{id}/episodes")
     suspend fun getEpisodes(@Path("id") id: String): List<Episode>
+
+    @GET("api/episodes/{id}/next-episode")
+    suspend fun getNextEpisode(@Path("id") episodeId: String): NextEpisode?
 
     @GET("api/shows/{id}/languages")
     suspend fun getShowLanguages(@Path("id") id: String): MediaLanguages

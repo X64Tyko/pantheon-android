@@ -119,6 +119,15 @@ fun PantheonNavHost(tokenStore: TokenStore, apiClient: ApiClient) {
                 contentId = id,
                 initialPositionMs = positionMs,
                 onBack = { navController.popBackStack() },
+                // See the mobile flavor's own comment — replace-style
+                // navigation so Back after an auto-advance leaves the
+                // player entirely rather than stepping into the just-
+                // finished episode.
+                onAdvanceToNext = { nextId ->
+                    navController.navigate(Routes.player("episode", nextId, 0)) {
+                        popUpTo(Routes.PLAYER) { inclusive = true }
+                    }
+                },
             )
         }
     }

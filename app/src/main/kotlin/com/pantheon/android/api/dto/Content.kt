@@ -98,6 +98,20 @@ data class Episode(
     val thumb: String? = null,
 )
 
+// GET /api/episodes/:id/next-episode -- null if this is the last episode
+// (ContentRepository::getNextEpisode). Mirrors hades/src/api/types.ts's
+// NextEpisode; drives the Player's Up Next overlay (see PlayerScreen.kt).
+data class NextEpisode(
+    @SerializedName("episode_id") val episodeId: String,
+    val season: Int,
+    val episode: Int,
+    val title: String,
+    @SerializedName("duration_ms") val durationMs: Long,
+    val overview: String? = null,
+    @SerializedName("air_date") val airDate: String? = null,
+    val thumb: String? = null,
+)
+
 // GET /api/shows/:id/languages, /api/movies/:id/languages — ISO 639-2 codes,
 // mirrors hades/src/api/types.ts's MediaLanguages. Can legitimately be long
 // (a well-tagged anime rip may embed 8-10 dub/subtitle languages) — see
