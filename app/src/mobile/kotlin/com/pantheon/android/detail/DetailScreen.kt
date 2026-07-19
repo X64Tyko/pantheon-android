@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -53,35 +54,13 @@ private val BgColor = Color(0xFF1B1C29)
 private val GoldColor = Color(0xFFE0B84E)
 private val TextDim = Color(0xFFB5B5C4)
 private val TileBg = Color(0xFF232438)
+private val SlateGray = Color(0xFF4A4E5A)
 
-// Mobile height/overlap for the fixed-backdrop + sticky-header layering
-// below — same *behavior* as hades/src/tv/TvLibraryDetail.tsx's
-// HERO_HEIGHT_CSS/HERO_OVERLAP (the header starts overlapped over the
-// backdrop's bottom edge and scrolls up to lock at the top), just resized
-// for a phone screen rather than a TV's max(36vh, 320px)/40px.
-//
-// Deliberately NOT resizing the backdrop to match the header's own height
-// once locked (an earlier version of this screen did) — the header is
-// almost always taller than the backdrop once genre chips/overview/
-// language rows are in it, so "match the header" meant the backdrop kept
-// growing well past its own image, dragging its scrim across content that
-// was already sitting on plain background and had no need of one (real
-// feedback: "the scrim behind details covers the whole banner instead of
-// just the important readability sections"), and depended on
-// onGloballyPositioned's one-frame-late measurement landing before the
-// scroll-driven collapse state changed, which could visibly desync from
-// season content scrolling into view (real feedback: "season/episode lists
-// are... over the banner"). Keeping the backdrop at a genuinely fixed
-// height sidesteps both: the header is simply taller than it and spills
-// onto plain background below it, same as any normal overlapping-hero
-// pattern.
+// Sticky header starts overlapping the fixed backdrop's bottom edge by
+// HERO_OVERLAP, then locks at the top once scrolled there.
 private val HERO_HEIGHT = 220.dp
 private val HERO_OVERLAP = 26.dp
 
-// Backdrop's own scrim (bounded to HERO_HEIGHT — it never needs to cover
-// more than the image itself) and title text shadow — named constants
-// rather than literals inline in the composable, same convention as the
-// colors/sizing above.
 private val BackdropScrimBrush = Brush.verticalGradient(
     0f to Color.Transparent,
     0.5f to Color.Black.copy(alpha = 0.35f),
@@ -89,20 +68,9 @@ private val BackdropScrimBrush = Brush.verticalGradient(
 )
 private val TitleTextShadow = Shadow(color = Color.Black, offset = Offset(0f, 2f), blurRadius = 8f)
 
-// Mobile counterpart of hades/src/tv/TvLibraryDetail.tsx — same
-// detail.zones gating (hero-backdrop/meta-block/genre-chips/play-button/
-// episode-shelves), same DetailViewModel shared with the TV flavor, and
-// deliberately the same scrolling/layering model as the web version (fixed
-// backdrop behind a sticky header, per-episode hero retargeting) rather
-// than a from-scratch mobile layout — only the sizing is mobile-native.
-//
-// Web retargets the header's title/overview/backdrop on *hover* (mouse) or
-// *focus* (D-pad) — touch has neither, so tapping an episode tile is the
-// touch analog of that hover: first tap selects it (updates the header,
-// same as hovering would on web), a second tap on the already-selected
-// tile — or its own Play circle — actually plays it. This is the same
-// select-then-confirm pattern as Home's shelf MediaCard (item 3 feedback),
-// applied here to episode tiles per item 8's feedback.
+// Mobile counterpart of hades/src/tv/TvLibraryDetail.tsx. Tapping an
+// episode tile is the touch analog of web's hover-to-retarget: first tap
+// selects it (updates the header), a second tap (or its Play circle) plays.
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DetailScreen(
@@ -166,13 +134,9 @@ fun DetailScreen(
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
-            // Fixed backdrop layer, genuinely fixed height (see the
-            // constants' own comment) — never part of the scrolling list,
-            // so it can't slide fully off screen the way a plain LazyColumn
-            // item would (item 7's original bug), and never grows past its
-            // own image, so its scrim never darkens content that isn't
-            // actually over it. Retargets to the selected episode's still,
-            // same as web's backdropUrl.
+            // Fixed peek behind the spacer before the header scrolls up to
+            // it — the header carries its own copy of this same image
+            // below, which takes over once stuck.
             if (viewModel.hasZone("hero-backdrop")) {
                 Box(modifier = Modifier.fillMaxWidth().height(HERO_HEIGHT).align(Alignment.TopStart)) {
                     val backdropUrl = if (selectedEpisode != null) {
@@ -195,27 +159,32 @@ fun DetailScreen(
                     Spacer(modifier = Modifier.height(with(density) { heroSpacerPx.toDp() }))
                 }
 
-                // Locks at the top once scrolled there — the sticky-header
-                // primitive is what gives this the same "header overlaps,
-                // then locks" behavior as web's position: sticky, no manual
-                // offset math needed for the lock itself (only for sizing
-                // the backdrop above, which does need it).
                 stickyHeader(key = "header") {
-                    // No background here — deliberately transparent. Once
-                    // this item locks to the top of the screen, the
-                    // season/episode list below keeps scrolling underneath
-                    // it (that's what "sticky" means), and while nothing
-                    // opaque has scrolled up that far yet, what's actually
-                    // behind the header's own transparent gaps is the fixed
-                    // hero backdrop — which is exactly what should show
-                    // through (real feedback: "the background...blocks the
-                    // entire banner, the hero banner itself should be in
-                    // front of the seasons and episodes"). The opaque
-                    // backing needed to stop *list content* bleeding through
-                    // once it does scroll up this far now lives on each
-                    // season block below instead, so it only appears once
-                    // there's actually something there to hide.
-                    Column(modifier = Modifier.fillMaxWidth()) {
+                    // Banner lives here, sized to at least cover the
+                    // header's own content, so it's always in front of
+                    // whatever season/episode content scrolls underneath
+                    // once stuck — not a separate fixed layer behind the
+                    // list.
+                    Box(modifier = Modifier.fillMaxWidth().heightIn(min = HERO_HEIGHT)) {
+                        if (viewModel.hasZone("hero-backdrop")) {
+                            val backdropUrl = if (selectedEpisode != null) {
+                                selectedEpisode.thumb?.let { apiClient.mediaUrl("/api/episodes/${selectedEpisode.episodeId}/thumb") }
+                            } else {
+                                viewModel.art?.let { apiClient.mediaUrl("/api/${if (contentType == "show") "shows" else "movies"}/$id/art") }
+                            }
+                            if (backdropUrl != null) {
+                                AsyncImage(
+                                    model = backdropUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.matchParentSize(),
+                                )
+                                Box(modifier = Modifier.matchParentSize().background(BackdropScrimBrush))
+                            } else {
+                                Box(modifier = Modifier.matchParentSize().background(SlateGray))
+                            }
+                        }
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
                                 Box(modifier = Modifier.width(110.dp).aspectRatio(2f / 3f).background(TileBg)) {
                                     AsyncImage(
@@ -276,13 +245,6 @@ fun DetailScreen(
                                 }
                             }
 
-                            // Clamped, same reasoning as the overview above —
-                            // a well-tagged anime rip can embed 8-10 dub/
-                            // subtitle languages, and hades' own
-                            // LanguageChips.tsx shows all of them unclamped
-                            // (fine on a desktop-width panel, not on a phone)
-                            // — see item 10's own feedback. "+N more" opens
-                            // the same full list.
                             val languages = viewModel.languages
                             if (languages != null && (!languages.audio.isNullOrEmpty() || !languages.subtitle.isNullOrEmpty())) {
                                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
@@ -294,17 +256,14 @@ fun DetailScreen(
                                     }
                                 }
                             }
+                        }
                     }
                 }
 
                 if (viewModel.hasZone("episode-shelves") && contentType == "show") {
                     items(viewModel.seasons, key = { it.number }) { season ->
                         val expanded = season.number in expandedSeasons
-                        // Opaque — see the sticky header's own comment above:
-                        // this is what actually needs to hide behind the
-                        // header once it scrolls up underneath it, not the
-                        // header itself.
-                        Column(modifier = Modifier.fillMaxWidth().background(BgColor).padding(vertical = 4.dp)) {
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth()
                                     .clickable {
