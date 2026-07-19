@@ -97,6 +97,12 @@ fun LibraryScreen(
             selectedLibraryIds = viewModel.selectedLibraryIds,
             onToggleLibrary = viewModel::toggleLibrary,
             fetchValuesFor = viewModel::filterValuesFor,
+            sortOptions = viewModel.sortOptions,
+            sort = viewModel.sort,
+            sortDir = viewModel.sortDir,
+            onSetSort = viewModel::onSortChange,
+            onSetSortDir = viewModel::onSortDirChange,
+            onReroll = viewModel::rerollRandom,
             onClose = { filtersOpen = false; viewModel.applyFilters() },
         )
     }
@@ -114,7 +120,7 @@ fun LibraryScreen(
                     color = Color.White,
                     modifier = Modifier.padding(start = 16.dp).weight(1f),
                 )
-                if (viewModel.filterFields.isNotEmpty() || viewModel.libraries.isNotEmpty()) {
+                if (viewModel.filterFields.isNotEmpty() || viewModel.libraries.isNotEmpty() || viewModel.sortOptions.isNotEmpty()) {
                     TvTextButton(
                         text = if (activeFilterCount > 0) "Filters ($activeFilterCount)" else "Filters",
                         onClick = { filtersOpen = true },

@@ -208,7 +208,16 @@ fun DetailScreen(
                     // below the backdrop's bottom edge; the backdrop's own
                     // scrim (bounded to HERO_HEIGHT) is all the contrast
                     // protection the part actually over the image needs.
-                    Column(modifier = Modifier.fillMaxWidth()) {
+                    //
+                    // .background(BgColor) is load-bearing, not decorative:
+                    // once this item locks to the top of the screen, the
+                    // season/episode list below keeps scrolling underneath
+                    // it (that's what "sticky" means) — without an opaque
+                    // background here, the header's own transparent gaps
+                    // (between/around the overview and language rows) let
+                    // that scrolling content show through, visually
+                    // clipping into the header's own text.
+                    Column(modifier = Modifier.fillMaxWidth().background(BgColor)) {
                             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
                                 Box(modifier = Modifier.width(110.dp).aspectRatio(2f / 3f).background(TileBg)) {
                                     AsyncImage(

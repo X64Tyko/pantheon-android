@@ -16,6 +16,7 @@ import com.pantheon.android.filter.FilterTreeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 private const val PAGE_SIZE = 48
 private const val SEARCH_DEBOUNCE_MS = 300L
@@ -55,6 +56,10 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
     // button/panel becomes meaningful.
     val filterFields: List<String> get() = zone("filter-pills")?.filterFields ?: emptyList()
 
+    // Same manifest-declared-allowlist principle, for the sort picker (kairos
+    // v83) — see SortFields.kt's own comment.
+    val sortOptions: List<String> get() = zone("filter-pills")?.sortOptions ?: emptyList()
+
     var shows by mutableStateOf<List<Show>>(emptyList())
         private set
     var movies by mutableStateOf<List<Movie>>(emptyList())
@@ -69,6 +74,17 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
         private set
 
     var query by mutableStateOf("")
+        private set
+
+    var sort by mutableStateOf("recently_added")
+        private set
+    var sortDir by mutableStateOf("")
+        private set
+    // Only meaningful while sort == "random" — a fixed seed keeps the
+    // shuffled order stable across a fetch + loadMore pagination sequence
+    // (SQLite's bare RANDOM() would otherwise reshuffle on every query),
+    // mirrors hades' LibraryStore.ts's own randomSeed exactly.
+    var randomSeed by mutableStateOf(Random.nextInt(Int.MAX_VALUE))
         private set
 
     var libraries by mutableStateOf<List<LibraryWithSource>>(emptyList())
@@ -119,6 +135,27 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
         }
     }
 
+    // Named on*Change rather than set<PropertyName> — the latter collides at
+    // the JVM signature level with the mutableStateOf property's own
+    // synthesized setter (same platform declaration clash onQueryChange's
+    // own comment above already calls out).
+    fun onSortChange(s: String) {
+        sort = s
+        page = 0
+        viewModelScope.launch { fetch() }
+    }
+
+    fun onSortDirChange(d: String) {
+        sortDir = d
+        page = 0
+        viewModelScope.launch { fetch() }
+    }
+
+    fun rerollRandom() {
+        randomSeed = Random.nextInt(Int.MAX_VALUE)
+        if (sort == "random") { page = 0; viewModelScope.launch { fetch() } }
+    }
+
     fun toggleLibrary(libraryId: String) {
         val next = selectedLibraryIds.toMutableSet()
         if (!next.remove(libraryId)) next.add(libraryId)
@@ -155,13 +192,21 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
         return selectedLibraries().any { it.libraryType == type || it.libraryType == "mixed" }
     }
 
-    private fun params(offset: Int): Map<String, String> {
+    // "Recently Aired/Released" is one combined option in the sort picker
+    // (shows and movies don't share a single backend sort mode for it), same
+    // split as hades' LibraryStore.ts's showSort()/movieSort().
+    private fun showSort() = if (sort == "recently_released_or_aired") "recently_aired" else sort
+    private fun movieSort() = if (sort == "recently_released_or_aired") "recently_released" else sort
+
+    private fun params(offset: Int, sortValue: String): Map<String, String> {
         val p = mutableMapOf("limit" to PAGE_SIZE.toString(), "offset" to offset.toString(), "hide_empty" to "1")
         val allSelected = libraries.isNotEmpty() && selectedLibraryIds.size >= libraries.size
         if (!allSelected && selectedLibraryIds.isNotEmpty()) p["library_ids"] = selectedLibraryIds.joinToString(",")
         val filter = listOfNotNull(filterTree.toFilterString().takeIf { it.isNotBlank() }, query.trim().takeIf { it.isNotEmpty() })
             .joinToString(" ")
         if (filter.isNotBlank()) p["filter"] = filter
+        if (sortValue.isNotBlank()) p["sort"] = sortValue
+        if (sortValue == "random") p["seed"] = randomSeed.toString() else if (sortDir.isNotBlank()) p["sort_dir"] = sortDir
         return p
     }
 
@@ -173,9 +218,8 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
         loading = true
         errorMessage = null
         try {
-            val p = params(0)
-            val showRes = if (wantsType("show")) apiClient.service.getShows(p) else null
-            val movieRes = if (wantsType("movie")) apiClient.service.getMovies(p) else null
+            val showRes = if (wantsType("show")) apiClient.service.getShows(params(0, showSort())) else null
+            val movieRes = if (wantsType("movie")) apiClient.service.getMovies(params(0, movieSort())) else null
             shows = showRes?.items.orEmpty()
             movies = movieRes?.items.orEmpty()
             total = (showRes?.total ?: 0) + (movieRes?.total ?: 0)
@@ -194,9 +238,9 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
             loadingMore = true
             val nextPage = page + 1
             try {
-                val p = params(nextPage * PAGE_SIZE)
-                val showRes = if (wantsType("show")) apiClient.service.getShows(p) else null
-                val movieRes = if (wantsType("movie")) apiClient.service.getMovies(p) else null
+                val offset = nextPage * PAGE_SIZE
+                val showRes = if (wantsType("show")) apiClient.service.getShows(params(offset, showSort())) else null
+                val movieRes = if (wantsType("movie")) apiClient.service.getMovies(params(offset, movieSort())) else null
                 shows = shows + showRes?.items.orEmpty()
                 movies = movies + movieRes?.items.orEmpty()
                 page = nextPage

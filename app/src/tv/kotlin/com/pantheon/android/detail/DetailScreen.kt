@@ -138,7 +138,13 @@ fun DetailScreen(
 
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             stickyHeader(key = "header") {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                // .background(BgColor) is load-bearing, not decorative — see
+                // the mobile flavor's own DetailScreen.kt comment: once this
+                // item locks to the top of the screen, the season/episode
+                // list below keeps scrolling underneath it, and without an
+                // opaque background here the header's own transparent gaps
+                // (around the overview text) let that content bleed through.
+                Column(modifier = Modifier.fillMaxWidth().background(BgColor)) {
                     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 16.dp)) {
                         Box(modifier = Modifier.width(160.dp).aspectRatio(2f / 3f).background(TileBg)) {
                             AsyncImage(

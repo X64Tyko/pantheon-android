@@ -40,6 +40,7 @@ import com.pantheon.android.filter.FilterItem
 import com.pantheon.android.filter.FilterRule
 import com.pantheon.android.filter.FilterTreeState
 import com.pantheon.android.filter.RESOLUTIONS
+import com.pantheon.android.filter.SORT_DEFS
 import com.pantheon.android.filter.ValueType
 
 private val TileBorder = Color(0xFF2E2F45)
@@ -68,6 +69,12 @@ fun TvFilterPanel(
     selectedLibraryIds: Set<String>,
     onToggleLibrary: (String) -> Unit,
     fetchValuesFor: suspend (String) -> List<String>,
+    sortOptions: List<String>,
+    sort: String,
+    sortDir: String,
+    onSetSort: (String) -> Unit,
+    onSetSortDir: (String) -> Unit,
+    onReroll: () -> Unit,
     onClose: () -> Unit,
 ) {
     val doneFocusRequester = remember { FocusRequester() }
@@ -91,6 +98,26 @@ fun TvFilterPanel(
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 10.dp)) {
                             items(libraries, key = { it.libraryId }) { lib ->
                                 TvChip(lib.displayName, lib.libraryId in selectedLibraryIds) { onToggleLibrary(lib.libraryId) }
+                            }
+                        }
+                    }
+                }
+
+                if (sortOptions.isNotEmpty()) {
+                    item {
+                        val dirless = SORT_DEFS[sort]?.dirless ?: false
+                        Text("Sort", color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 10.dp)) {
+                            items(sortOptions, key = { it }) { s ->
+                                TvChip(SORT_DEFS[s]?.label ?: s, sort == s) { onSetSort(s) }
+                            }
+                        }
+                        if (dirless) {
+                            TvTextButton(text = "🎲 Reroll", onClick = onReroll)
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                TvChip("ASC", sortDir == "asc") { onSetSortDir(if (sortDir == "asc") "" else "asc") }
+                                TvChip("DESC", sortDir == "desc") { onSetSortDir(if (sortDir == "desc") "" else "desc") }
                             }
                         }
                     }
@@ -207,9 +234,17 @@ private fun TvFilterRuleRow(
                     placeholder = { androidx.compose.material3.Text("value…") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (suggestions.isNotEmpty()) {
+                // Narrows to what's actually typed so far — suggestions is
+                // the full fetched candidate pool for this field (cached),
+                // this just re-filters it locally on every keystroke rather
+                // than showing the same static top-30 regardless of input.
+                val visibleSuggestions = remember(suggestions, rule.value) {
+                    if (rule.value.isBlank()) suggestions.take(30)
+                    else suggestions.filter { it.contains(rule.value, ignoreCase = true) }.take(30)
+                }
+                if (visibleSuggestions.isNotEmpty()) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-                        items(suggestions.take(30), key = { it }) { s ->
+                        items(visibleSuggestions, key = { it }) { s ->
                             TvChip(s, rule.value == s) { onUpdate(null, null, s) }
                         }
                     }

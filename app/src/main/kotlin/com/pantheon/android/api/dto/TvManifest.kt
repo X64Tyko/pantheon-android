@@ -48,6 +48,7 @@ data class TvZone(
     val order: Int,
     val dataSource: TvDataSource? = null,
     val filterFields: List<String>? = null,
+    val sortOptions: List<String>? = null,
     val itemAction: String? = null,
     val showOnly: Boolean? = null,
 )

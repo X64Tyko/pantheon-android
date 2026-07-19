@@ -46,6 +46,7 @@ import com.pantheon.android.filter.FilterRule
 import com.pantheon.android.filter.FilterTreeState
 import com.pantheon.android.filter.DECADES
 import com.pantheon.android.filter.RESOLUTIONS
+import com.pantheon.android.filter.SORT_DEFS
 import com.pantheon.android.filter.ValueType
 
 private val BgColor = Color(0xFF1B1C29)
@@ -67,6 +68,12 @@ fun FilterPanel(
     selectedLibraryIds: Set<String>,
     onToggleLibrary: (String) -> Unit,
     fetchValuesFor: suspend (String) -> List<String>,
+    sortOptions: List<String>,
+    sort: String,
+    sortDir: String,
+    onSetSort: (String) -> Unit,
+    onSetSortDir: (String) -> Unit,
+    onReroll: () -> Unit,
     onClose: () -> Unit,
 ) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -86,6 +93,26 @@ fun FilterPanel(
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
                             items(libraries, key = { it.libraryId }) { lib ->
                                 FilterChip(lib.displayName, lib.libraryId in selectedLibraryIds) { onToggleLibrary(lib.libraryId) }
+                            }
+                        }
+                    }
+                }
+
+                if (sortOptions.isNotEmpty()) {
+                    item {
+                        val dirless = SORT_DEFS[sort]?.dirless ?: false
+                        Text("Sort", color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+                            items(sortOptions, key = { it }) { s ->
+                                FilterChip(SORT_DEFS[s]?.label ?: s, sort == s) { onSetSort(s) }
+                            }
+                        }
+                        if (dirless) {
+                            TextButton(onClick = onReroll) { Text("🎲 Reroll", color = GoldColor) }
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip("ASC", sortDir == "asc") { onSetSortDir(if (sortDir == "asc") "" else "asc") }
+                                FilterChip("DESC", sortDir == "desc") { onSetSortDir(if (sortDir == "desc") "" else "desc") }
                             }
                         }
                     }
@@ -209,9 +236,17 @@ private fun FilterRuleRow(
                     placeholder = { Text("value…") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 )
-                if (suggestions.isNotEmpty()) {
+                // Narrows to what's actually typed so far — suggestions is
+                // the full fetched candidate pool for this field (cached),
+                // this just re-filters it locally on every keystroke rather
+                // than showing the same static top-30 regardless of input.
+                val visibleSuggestions = remember(suggestions, rule.value) {
+                    if (rule.value.isBlank()) suggestions.take(30)
+                    else suggestions.filter { it.contains(rule.value, ignoreCase = true) }.take(30)
+                }
+                if (visibleSuggestions.isNotEmpty()) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
-                        items(suggestions.take(30), key = { it }) { s ->
+                        items(visibleSuggestions, key = { it }) { s ->
                             FilterChip(s, active = rule.value == s) { onUpdate(null, null, s) }
                         }
                     }
