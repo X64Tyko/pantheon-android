@@ -104,7 +104,26 @@ fun PlayerScreen(
                     .build(),
             ))
         }
-        exoPlayer.setMediaItem(itemBuilder.build())
+        if (viewModel.isLive) {
+            exoPlayer.setMediaItem(itemBuilder.build())
+        } else {
+            // VOD sessions are served as a growing HLS "event" playlist while
+            // Hephaestus is still transcoding (VodSession.cpp's
+            // -hls_playlist_type event) — no #EXT-X-ENDLIST until the whole
+            // file finishes, and unlike live channels (paced with -re) the
+            // VOD encode races ahead as fast as the hardware allows, so
+            // several segments can already exist by the time this session's
+            // manifest is first fetched. ExoPlayer's HLS source decides
+            // "is this live" purely from ENDLIST absence, same as hls.js —
+            // without an explicit start position it defaults an unprepared
+            // dynamic window to the live edge, so playback jumped straight to
+            // wherever the transcode had currently raced ahead to instead of
+            // the actual beginning. Mirrors VideoPlayer.tsx's
+            // `isLive ? {} : { startPosition: 0 }` for hls.js — this
+            // manifest's own timeline always starts at 0 regardless of the
+            // requested resume point (see basePositionMs's comment).
+            exoPlayer.setMediaItem(itemBuilder.build(), 0L)
+        }
         exoPlayer.prepare()
     }
 
