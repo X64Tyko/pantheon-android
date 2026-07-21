@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.tv.material3.Button
 import androidx.tv.material3.ClickableSurfaceDefaults
@@ -82,6 +84,7 @@ fun DetailScreen(
     val listState = rememberLazyListState()
     val playFocusRequester = remember { FocusRequester() }
     var expandedSeasonNumber by remember { mutableStateOf<Int?>(null) }
+    var overviewDialogOpen by remember { mutableStateOf(false) }
     // Real rendered height of the header+banner box below — keeps
     // D-pad-focused seasons/episodes scrolling to just below it rather than
     // underneath it. seasonIndex + 1 because the sticky header occupies
@@ -107,6 +110,10 @@ fun DetailScreen(
         viewModel.errorMessage?.let { message ->
             Text(message, color = TextDim, modifier = Modifier.align(Alignment.Center))
             return@Box
+        }
+
+        if (overviewDialogOpen) {
+            OverviewDialog(title = viewModel.title, overview = viewModel.overview, onClose = { overviewDialogOpen = false })
         }
 
         // Only after the Play button is actually composed (hasZone gates
@@ -173,7 +180,26 @@ fun DetailScreen(
                                 }
 
                                 if (viewModel.overview.isNotEmpty()) {
-                                    Text(viewModel.overview, color = TextDim, modifier = Modifier.padding(top = 10.dp).width(560.dp))
+                                    // Capped like mobile's overview text — without this, a long
+                                    // synopsis grows the sticky header (backdrop included, via
+                                    // matchParentSize) past the screen height, leaving no room
+                                    // below it for the season/episode shelf to scroll into.
+                                    var overviewOverflowing by remember { mutableStateOf(false) }
+                                    Text(
+                                        viewModel.overview,
+                                        color = TextDim,
+                                        maxLines = 3,
+                                        overflow = TextOverflow.Ellipsis,
+                                        onTextLayout = { result -> overviewOverflowing = result.hasVisualOverflow },
+                                        modifier = Modifier.padding(top = 10.dp).width(560.dp),
+                                    )
+                                    if (overviewOverflowing) {
+                                        TvTextButton(
+                                            text = "More info",
+                                            onClick = { overviewDialogOpen = true },
+                                            modifier = Modifier.padding(top = 6.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -283,5 +309,27 @@ private fun EpisodeTile(apiClient: ApiClient, episodeId: String, episodeNumber: 
 private fun TvTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(onClick = onClick, modifier = modifier, colors = ClickableSurfaceDefaults.colors(containerColor = Color.Black.copy(alpha = 0.4f))) {
         Text(text, color = Color.White, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+    }
+}
+
+// TV counterpart of the mobile flavor's OverviewDialog — surfaced from the
+// "More info" button so a long synopsis never has to grow the sticky header
+// itself (see the overview Text's maxLines cap above).
+@Composable
+private fun OverviewDialog(title: String, overview: String, onClose: () -> Unit) {
+    val closeFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { closeFocusRequester.requestFocus() }
+    Dialog(onDismissRequest = onClose) {
+        Column(
+            modifier = Modifier.width(680.dp).background(BgColor, RoundedCornerShape(12.dp)).padding(32.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.headlineSmall, color = Color.White)
+            Text(overview, color = TextDim, modifier = Modifier.padding(top = 16.dp))
+            TvTextButton(
+                text = "Close",
+                onClick = onClose,
+                modifier = Modifier.align(Alignment.End).padding(top = 20.dp).focusRequester(closeFocusRequester),
+            )
+        }
     }
 }
