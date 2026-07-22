@@ -10,18 +10,19 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.NextEpisode
 import com.pantheon.android.api.dto.VodStartRequest
+import com.pantheon.android.api.dto.VodTracks
 import com.pantheon.android.api.dto.WatchProgressBody
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
-// Kotlin counterpart of hades/src/player/usePlaybackSession.ts, trimmed to
-// this pass's scope: no track-switch/reload (audio/subtitle track picker is
-// a real follow-up, not built this round — media3-ui's PlayerView still
-// exposes whatever the manifest itself carries as embedded/default tracks).
+// Kotlin counterpart of hades/src/player/usePlaybackSession.ts, including its
+// reload()-based track-switch: a track switch and a seek are the same
+// operation server-side ("stop this VOD session, start a fresh one"), so
+// selectTracks() below just calls the same load() a seek would.
 // Resume position, live-vs-VOD session lifecycle, periodic watch-progress
-// reporting, and Up Next auto-advance are the real behaviors this needs to
+// reporting, and Up Next auto-advance are the other behaviors this needs to
 // get right, and does.
 //
 // Deliberately no chapter-based intro/credits detection the way
@@ -55,6 +56,15 @@ class PlayerViewModel(
         private set
     var upNextDismissed by mutableStateOf(false)
         private set
+    var tracks by mutableStateOf<VodTracks?>(null)
+        private set
+    // -1 for both: audioTrack means "server picked the first/default track"
+    // (resolved to a real index once the session responds), subtitleTrack
+    // means "off" — same convention as usePlaybackSession.ts's own state.
+    var audioTrack by mutableStateOf(-1)
+        private set
+    var subtitleTrack by mutableStateOf(-1)
+        private set
 
     val isLive: Boolean get() = kind == "channel"
 
@@ -70,10 +80,10 @@ class PlayerViewModel(
     private var generation = 0
 
     init {
-        load(initialPositionMs)
+        load(initialPositionMs, -1, -1)
     }
 
-    private fun load(positionMs: Long) {
+    private fun load(positionMs: Long, aTrack: Int, sTrack: Int) {
         val myGen = ++generation
         val prevSession = sessionId
         sessionId = null
@@ -100,7 +110,20 @@ class PlayerViewModel(
             loading = true
             errorMessage = null
             val result = runCatching {
-                apiClient.service.startVodPlayback(VodStartRequest(contentType = kind, contentId = contentId, positionMs = positionMs))
+                apiClient.service.startVodPlayback(
+                    VodStartRequest(
+                        contentType = kind,
+                        contentId = contentId,
+                        // -1 is "unset"/"off" on our side; the server's own
+                        // default for an omitted field is the same -1 (see
+                        // Router.cpp's `body.value("audio_track", -1)`), so
+                        // null and -1 are equivalent here — sent as null
+                        // purely to match usePlaybackSession.ts's `?? undefined`.
+                        audioTrack = aTrack.takeIf { it >= 0 },
+                        subtitleTrack = sTrack.takeIf { it != -1 },
+                        positionMs = positionMs,
+                    ),
+                )
             }
             if (generation != myGen) {
                 result.getOrNull()?.let { res -> runCatching { apiClient.service.stopVodPlayback(res.sessionId) } }
@@ -112,6 +135,9 @@ class PlayerViewModel(
                 subtitleUrl = res.subtitleUrl?.let { apiClient.streamUrl(it) }
                 title = res.title
                 durationMs = res.durationMs
+                tracks = res.tracks
+                audioTrack = if (aTrack >= 0) aTrack else (res.tracks?.audio?.firstOrNull()?.index ?: -1)
+                subtitleTrack = sTrack
             }.onFailure { e ->
                 errorMessage = e.message ?: "Failed to start playback"
             }
@@ -127,6 +153,19 @@ class PlayerViewModel(
     }
 
     fun dismissUpNext() { upNextDismissed = true }
+
+    // VOD only — restarts the session at the given absolute position with a
+    // new track selection. currentPositionMs is the player's own (manifest-
+    // relative) position; basePositionMs converts it to the absolute
+    // position a fresh session needs, same as usePlaybackSession.ts's
+    // reload(). null (not -1) means "leave this track as-is" — -1 is itself
+    // a real, explicit subtitle selection ("off"), so it can't double as the
+    // sentinel the way it does for audioTrack's "server picks the default"
+    // meaning elsewhere in this class.
+    fun selectTracks(currentPositionMs: Long, newAudioTrack: Int? = null, newSubtitleTrack: Int? = null) {
+        if (isLive) return
+        load(basePositionMs + currentPositionMs, newAudioTrack ?: audioTrack, newSubtitleTrack ?: subtitleTrack)
+    }
 
     // Called every PROGRESS_PING_MS by the player screen's own timer, fed
     // the player's raw (manifest-relative) position — mirrors PlayerPage.tsx's

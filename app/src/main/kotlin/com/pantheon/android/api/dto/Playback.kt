@@ -14,8 +14,26 @@ data class VodStartRequest(
     @SerializedName("hdr_capable") val hdrCapable: Boolean = false,
 )
 
-data class VodTrackAudio(val index: Int, val language: String? = null, val title: String? = null)
-data class VodTrackSubtitle(val index: Int, val language: String? = null, val title: String? = null)
+data class VodTrackAudio(
+    val index: Int,
+    val language: String? = null,
+    val title: String? = null,
+    val channels: Int = 0,
+)
+
+// extractable/burnIn/source mirror hades/src/player/playbackApi.ts's
+// VodTrackSubtitle doc exactly — see there for what each means and why
+// negative indices (<= -2) are reserved for external sidecar tracks.
+data class VodTrackSubtitle(
+    val index: Int,
+    val language: String? = null,
+    val title: String? = null,
+    val extractable: Boolean = false,
+    @SerializedName("burn_in") val burnIn: Boolean = false,
+    val source: String = "embedded",
+    val forced: Boolean = false,
+    val sdh: Boolean = false,
+)
 data class VodTracks(val audio: List<VodTrackAudio>? = null, val subtitles: List<VodTrackSubtitle>? = null)
 
 data class VodStartResponse(
