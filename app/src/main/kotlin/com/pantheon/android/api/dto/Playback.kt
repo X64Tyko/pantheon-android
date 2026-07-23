@@ -14,37 +14,18 @@ data class VodStartRequest(
     @SerializedName("hdr_capable") val hdrCapable: Boolean = false,
 )
 
-data class VodTrackAudio(
-    val index: Int,
-    val language: String? = null,
-    val title: String? = null,
-    val channels: Int = 0,
-)
-
-// extractable/burnIn/source mirror hades/src/player/playbackApi.ts's
-// VodTrackSubtitle doc exactly — see there for what each means and why
-// negative indices (<= -2) are reserved for external sidecar tracks.
-data class VodTrackSubtitle(
-    val index: Int,
-    val language: String? = null,
-    val title: String? = null,
-    val extractable: Boolean = false,
-    @SerializedName("burn_in") val burnIn: Boolean = false,
-    val source: String = "embedded",
-    val forced: Boolean = false,
-    val sdh: Boolean = false,
-)
-data class VodTracks(val audio: List<VodTrackAudio>? = null, val subtitles: List<VodTrackSubtitle>? = null)
-
 data class VodStartResponse(
     @SerializedName("session_id") val sessionId: String,
+    // Now a multi-rendition HLS master manifest (AUDIO/SUBTITLES groups) —
+    // see hephaestus/src/stream/VodSession.cpp's buildMasterPlaylist.
+    // ExoPlayer's own TrackSelector drives track selection straight against
+    // it, so this app has no need for the per-track fields (subtitle_url,
+    // tracks) the JSON response still carries for other consumers (e.g.
+    // hades/src/player/playbackApi.ts's TrackMenu).
     @SerializedName("manifest_url") val manifestUrl: String,
-    @SerializedName("subtitle_url") val subtitleUrl: String? = null,
     @SerializedName("direct_play") val directPlay: Boolean = false,
     @SerializedName("duration_ms") val durationMs: Long = 0,
     val title: String = "",
-    val tracks: VodTracks? = null,
-    @SerializedName("subtitle_burned_in") val subtitleBurnedIn: Boolean = false,
 )
 
 data class WatchProgressBody(

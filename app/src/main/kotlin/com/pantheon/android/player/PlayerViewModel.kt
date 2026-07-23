@@ -11,7 +11,6 @@ import com.pantheon.android.BuildConfig
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.NextEpisode
 import com.pantheon.android.api.dto.VodStartRequest
-import com.pantheon.android.api.dto.VodTracks
 import com.pantheon.android.api.dto.WatchProgressBody
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
@@ -26,10 +25,14 @@ import kotlinx.coroutines.launch
 private val deviceType: String =
     if (BuildConfig.FLAVOR.contains("Tv", ignoreCase = true)) "android-tv" else "android-mobile"
 
-// Kotlin counterpart of hades/src/player/usePlaybackSession.ts, including its
-// reload()-based track-switch: a track switch and a seek are the same
-// operation server-side ("stop this VOD session, start a fresh one"), so
-// selectTracks() below just calls the same load() a seek would.
+// Kotlin counterpart of hades/src/player/usePlaybackSession.ts. Unlike the
+// web client, this app has no app-level track-switch API at all — the VOD
+// manifest Hephaestus serves is now a real multi-rendition HLS master
+// playlist (AUDIO/SUBTITLES groups — see hephaestus/src/stream/VodSession.cpp's
+// buildMasterPlaylist), so ExoPlayer's own TrackSelector/native settings menu
+// drives audio and subtitle selection directly against the manifest; nothing
+// here needs to restart the session for it (see PlayerScreen's exo_settings
+// gear, left visible instead of hidden).
 // Resume position, live-vs-VOD session lifecycle, periodic watch-progress
 // reporting, and Up Next auto-advance are the other behaviors this needs to
 // get right, and does.
@@ -55,8 +58,6 @@ class PlayerViewModel(
         private set
     var manifestUrl by mutableStateOf<String?>(null)
         private set
-    var subtitleUrl by mutableStateOf<String?>(null)
-        private set
     var title by mutableStateOf("")
         private set
     var durationMs by mutableStateOf(0L)
@@ -64,15 +65,6 @@ class PlayerViewModel(
     var nextEpisode by mutableStateOf<NextEpisode?>(null)
         private set
     var upNextDismissed by mutableStateOf(false)
-        private set
-    var tracks by mutableStateOf<VodTracks?>(null)
-        private set
-    // -1 for both: audioTrack means "server picked the first/default track"
-    // (resolved to a real index once the session responds), subtitleTrack
-    // means "off" — same convention as usePlaybackSession.ts's own state.
-    var audioTrack by mutableStateOf(-1)
-        private set
-    var subtitleTrack by mutableStateOf(-1)
         private set
     var directPlay by mutableStateOf(false)
         private set
@@ -91,10 +83,10 @@ class PlayerViewModel(
     private var generation = 0
 
     init {
-        load(initialPositionMs, -1, -1)
+        load(initialPositionMs)
     }
 
-    private fun load(positionMs: Long, aTrack: Int, sTrack: Int) {
+    private fun load(positionMs: Long) {
         val myGen = ++generation
         val prevSession = sessionId
         sessionId = null
@@ -122,16 +114,15 @@ class PlayerViewModel(
             errorMessage = null
             val result = runCatching {
                 apiClient.service.startVodPlayback(
+                    // audioTrack/subtitleTrack left unset — the server
+                    // auto-picks (saved per-show preference if any, else the
+                    // first/default track; see VodSession::start()) and
+                    // ExoPlayer's own TrackSelector can switch away from that
+                    // against the master manifest without this app needing
+                    // to know or ask for a specific one up front.
                     VodStartRequest(
                         contentType = kind,
                         contentId = contentId,
-                        // -1 is "unset"/"off" on our side; the server's own
-                        // default for an omitted field is the same -1 (see
-                        // Router.cpp's `body.value("audio_track", -1)`), so
-                        // null and -1 are equivalent here — sent as null
-                        // purely to match usePlaybackSession.ts's `?? undefined`.
-                        audioTrack = aTrack.takeIf { it >= 0 },
-                        subtitleTrack = sTrack.takeIf { it != -1 },
                         positionMs = positionMs,
                     ),
                 )
@@ -143,13 +134,9 @@ class PlayerViewModel(
             result.onSuccess { res ->
                 sessionId = res.sessionId
                 manifestUrl = apiClient.streamUrl(res.manifestUrl)
-                subtitleUrl = res.subtitleUrl?.let { apiClient.streamUrl(it) }
                 title = res.title
                 durationMs = res.durationMs
-                tracks = res.tracks
                 directPlay = res.directPlay
-                audioTrack = if (aTrack >= 0) aTrack else (res.tracks?.audio?.firstOrNull()?.index ?: -1)
-                subtitleTrack = sTrack
             }.onFailure { e ->
                 errorMessage = e.message ?: "Failed to start playback"
             }
@@ -165,19 +152,6 @@ class PlayerViewModel(
     }
 
     fun dismissUpNext() { upNextDismissed = true }
-
-    // VOD only — restarts the session at the given absolute position with a
-    // new track selection. currentPositionMs is the player's own (manifest-
-    // relative) position; basePositionMs converts it to the absolute
-    // position a fresh session needs, same as usePlaybackSession.ts's
-    // reload(). null (not -1) means "leave this track as-is" — -1 is itself
-    // a real, explicit subtitle selection ("off"), so it can't double as the
-    // sentinel the way it does for audioTrack's "server picks the default"
-    // meaning elsewhere in this class.
-    fun selectTracks(currentPositionMs: Long, newAudioTrack: Int? = null, newSubtitleTrack: Int? = null) {
-        if (isLive) return
-        load(basePositionMs + currentPositionMs, newAudioTrack ?: audioTrack, newSubtitleTrack ?: subtitleTrack)
-    }
 
     // Called every PROGRESS_PING_MS by the player screen's own timer, fed
     // the player's raw (manifest-relative) position — mirrors PlayerPage.tsx's

@@ -1,6 +1,5 @@
 package com.pantheon.android.player
 
-import android.view.View
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -11,16 +10,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,20 +38,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.NextEpisode
-import com.pantheon.android.api.dto.VodTrackAudio
-import com.pantheon.android.api.dto.VodTrackSubtitle
-import com.pantheon.android.api.dto.VodTracks
 import kotlinx.coroutines.delay
 
 private val GoldColor = Color(0xFFE0B84E)
@@ -101,27 +90,11 @@ fun PlayerScreen(
 
     LaunchedEffect(viewModel.manifestUrl) {
         val url = viewModel.manifestUrl ?: return@LaunchedEffect
+        // No manual subtitle sideloading — the manifest itself is now a
+        // multi-rendition HLS master playlist with its own AUDIO/SUBTITLES
+        // #EXT-X-MEDIA groups (see hephaestus's VodSession::buildMasterPlaylist),
+        // so ExoPlayer discovers every track straight from it.
         val itemBuilder = MediaItem.Builder().setUri(url)
-        // subtitle_url is only ever populated for extractable (WebVTT
-        // sidecar) tracks — a burned-in track is already composited into
-        // the video stream server-side and never populates it, so presence
-        // alone is the correct condition (see VodStartResponse's comment).
-        viewModel.subtitleUrl?.let { subUrl ->
-            val selected = viewModel.tracks?.subtitles?.find { it.index == viewModel.subtitleTrack }
-            itemBuilder.setSubtitleConfigurations(listOf(
-                MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(subUrl))
-                    .setMimeType(MimeTypes.TEXT_VTT)
-                    .setLanguage(selected?.language?.takeIf { it.isNotEmpty() } ?: "und")
-                    // Sideloaded tracks are otherwise available-but-inactive —
-                    // ExoPlayer's DefaultTrackSelector only auto-enables a text
-                    // track carrying this flag, same role HTML's <track default>
-                    // plays for hls.js/Safari on the web client. Safe to always
-                    // set here since this whole block only runs when the server
-                    // already resolved a subtitle selection into a sidecar URL.
-                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                    .build(),
-            ))
-        }
         if (viewModel.isLive) {
             exoPlayer.setMediaItem(itemBuilder.build())
         } else {
@@ -210,21 +183,6 @@ fun PlayerScreen(
         }
     }
 
-    // media3's PlayerView has no built-in way to switch between server-side
-    // track options — our HLS manifests only ever carry the single audio/
-    // subtitle combination Hephaestus was told to mux in (see VodSession.cpp),
-    // there's no client-side ABR track group to pick from the way a plain
-    // multi-track HLS source would give ExoPlayer's own TrackSelector. A
-    // track switch is a brand new VOD session (PlayerViewModel.selectTracks),
-    // same "seek is a new session" design as usePlaybackSession.ts's reload()
-    // — this dialog is this app's counterpart to TrackMenu.tsx.
-    var trackMenuOpen by remember { mutableStateOf(false) }
-    // Mirrors the native controller's own auto-hide state (media3 fades its
-    // transport bar after a few seconds idle) — without this the button sat
-    // permanently overlaid on the video regardless of whether the rest of
-    // the controls were showing.
-    var controlsVisible by remember { mutableStateOf(true) }
-
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         if (viewModel.manifestUrl != null) {
             AndroidView(
@@ -233,20 +191,11 @@ fun PlayerScreen(
                         player = exoPlayer
                         useController = true
                         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                        // media3's default controller ships its own gear
-                        // (exo_settings, playback-speed only) alongside our
-                        // "Audio & Subtitles" gear below — two settings icons
-                        // for one concept. Track switching here is a new VOD
-                        // session (see trackMenuOpen's comment), not a
-                        // client-side TrackSelector pick, so the native
-                        // settings menu has nothing useful to add; hide it so
-                        // there's a single gear.
-                        findViewById<View>(androidx.media3.ui.R.id.exo_settings)?.visibility = View.GONE
-                        setControllerVisibilityListener(
-                            PlayerView.ControllerVisibilityListener { visibility ->
-                                controlsVisible = visibility == View.VISIBLE
-                            },
-                        )
+                        // media3's default gear (exo_settings) now drives
+                        // audio/subtitle track selection itself, straight
+                        // against the master manifest's AUDIO/SUBTITLES
+                        // groups — left visible, no app-level equivalent
+                        // needed anymore.
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
@@ -257,24 +206,6 @@ fun PlayerScreen(
         }
         viewModel.errorMessage?.let { message ->
             Text(message, color = Color.White, modifier = Modifier.align(Alignment.Center))
-        }
-
-        if (!viewModel.isLive && viewModel.manifestUrl != null && controlsVisible) {
-            TextButton(
-                onClick = { trackMenuOpen = true },
-                modifier = Modifier.align(Alignment.TopEnd).padding(top = 40.dp, end = 8.dp),
-            ) { Text("⚙ Audio & Subtitles", color = Color.White) }
-        }
-
-        if (trackMenuOpen) {
-            TrackSelectionDialog(
-                tracks = viewModel.tracks,
-                currentAudio = viewModel.audioTrack,
-                currentSubtitle = viewModel.subtitleTrack,
-                onSelectAudio = { idx -> viewModel.selectTracks(exoPlayer.currentPosition, newAudioTrack = idx); trackMenuOpen = false },
-                onSelectSubtitle = { idx -> viewModel.selectTracks(exoPlayer.currentPosition, newSubtitleTrack = idx); trackMenuOpen = false },
-                onClose = { trackMenuOpen = false },
-            )
         }
 
         if (showUpNext) {
@@ -353,76 +284,3 @@ private fun UpNextOverlay(
     }
 }
 
-// Counterpart of hades/src/player/TrackMenu.tsx — same two sections (Audio,
-// Subtitles), same "Off" entry and disabled/unselectable styling for a
-// subtitle track that's neither extractable nor burned-in (see
-// VodTrackSubtitle's doc comment for what that means).
-@Composable
-private fun TrackSelectionDialog(
-    tracks: VodTracks?,
-    currentAudio: Int,
-    currentSubtitle: Int,
-    onSelectAudio: (Int) -> Unit,
-    onSelectSubtitle: (Int) -> Unit,
-    onClose: () -> Unit,
-) {
-    Dialog(onDismissRequest = onClose) {
-        Surface(color = Color(0xFF1B1C29), shape = RoundedCornerShape(12.dp)) {
-            Column(
-                modifier = Modifier
-                    .padding(20.dp)
-                    .width(300.dp)
-                    .heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                Text("Audio", color = Color.White, style = MaterialTheme.typography.titleMedium)
-                val audioTracks = tracks?.audio.orEmpty()
-                if (audioTracks.isEmpty()) {
-                    Text("No audio tracks found", color = TextDim, modifier = Modifier.padding(top = 8.dp))
-                } else {
-                    audioTracks.forEach { t ->
-                        TrackRow(label = audioLabel(t), active = t.index == currentAudio, onClick = { onSelectAudio(t.index) })
-                    }
-                }
-
-                Text("Subtitles", color = Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-                // -1 is the only "off" value — external tracks are negative
-                // too (<= -2), so this can't be `currentSubtitle < 0`.
-                TrackRow(label = "Off", active = currentSubtitle == -1, onClick = { onSelectSubtitle(-1) })
-                tracks?.subtitles.orEmpty().forEach { t ->
-                    val selectable = t.extractable || t.burnIn
-                    TrackRow(
-                        label = subtitleLabel(t),
-                        active = t.index == currentSubtitle,
-                        enabled = selectable,
-                        onClick = { if (selectable) onSelectSubtitle(t.index) },
-                    )
-                }
-
-                TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End).padding(top = 12.dp)) {
-                    Text("Close", color = GoldColor)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TrackRow(label: String, active: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
-    Text(
-        label,
-        color = if (!enabled) TextDim.copy(alpha = 0.5f) else if (active) GoldColor else Color.White,
-        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 8.dp),
-    )
-}
-
-private fun audioLabel(t: VodTrackAudio): String {
-    val name = t.title?.takeIf { it.isNotBlank() } ?: t.language?.uppercase()?.takeIf { it.isNotBlank() } ?: "Unknown"
-    val chDesc = when (t.channels) { 1 -> "mono"; 2 -> "stereo"; else -> if (t.channels > 0) "${t.channels}ch" else null }
-    return if (chDesc != null) "$name ($chDesc)" else name
-}
-
-private fun subtitleLabel(t: VodTrackSubtitle): String {
-    val name = t.title?.takeIf { it.isNotBlank() } ?: t.language?.uppercase()?.takeIf { it.isNotBlank() } ?: "Unknown"
-    return if (t.source == "external") "$name (external)" else name
-}
