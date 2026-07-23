@@ -96,6 +96,18 @@ fun LibraryScreen(
     var searchButtonFocused by remember { mutableStateOf(false) }
     val searchFocusRequester = remember { FocusRequester() }
     val searchHasFocus = searchEditing || searchButtonFocused
+    // Up from the search row falls through to Compose's default 2-D focus
+    // search unless routed explicitly. The header's "← Back" button is
+    // nearly always the only (or geometrically nearest/first-composed)
+    // candidate above the full-width search row, so unmodified Up-navigation
+    // out of search deterministically lands there instead of on Filters —
+    // "snaps to the back button" — even though Back navigates clean off the
+    // whole screen. Routed to this instead in both the editing and
+    // not-yet-editing key handlers below; falls back to just consuming the
+    // key (staying put) when Filters isn't rendered at all (see its own
+    // conditional).
+    val filtersFocusRequester = remember { FocusRequester() }
+    val filtersAvailable = viewModel.filterFields.isNotEmpty() || viewModel.libraries.isNotEmpty() || viewModel.sortOptions.isNotEmpty()
 
     // First Back press while browsing anywhere else on this screen (a grid
     // tile, the Filters button, ...) snaps D-pad focus to the search bar
@@ -154,10 +166,11 @@ fun LibraryScreen(
                     color = Color.White,
                     modifier = Modifier.padding(start = 16.dp).weight(1f),
                 )
-                if (viewModel.filterFields.isNotEmpty() || viewModel.libraries.isNotEmpty() || viewModel.sortOptions.isNotEmpty()) {
+                if (filtersAvailable) {
                     TvTextButton(
                         text = if (activeFilterCount > 0) "Filters ($activeFilterCount)" else "Filters",
                         onClick = { filtersOpen = true },
+                        modifier = Modifier.focusRequester(filtersFocusRequester),
                     )
                 }
             }
@@ -188,7 +201,9 @@ fun LibraryScreen(
                                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                                 when (event.key) {
                                     Key.DirectionDown -> { focusManager.moveFocus(FocusDirection.Down); true }
-                                    Key.DirectionUp -> { focusManager.moveFocus(FocusDirection.Up); true }
+                                    // Not moveFocus(Up) — see filtersFocusRequester's own
+                                    // comment above for why that lands on "← Back" instead.
+                                    Key.DirectionUp -> { if (filtersAvailable) filtersFocusRequester.requestFocus(); true }
                                     Key.Back -> { searchEditing = false; true }
                                     else -> false
                                 }
@@ -207,7 +222,16 @@ fun LibraryScreen(
                         onClick = { searchEditing = true },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp)
                             .focusRequester(searchFocusRequester)
-                            .onFocusChanged { searchButtonFocused = it.isFocused },
+                            .onFocusChanged { searchButtonFocused = it.isFocused }
+                            // Same "← Back" trap as the editing field's own
+                            // handler above — default Up-navigation out of this
+                            // full-width row has the same nearest-candidate
+                            // problem even when it's not yet an editable field.
+                            .onPreviewKeyEvent { event ->
+                                if (event.type != KeyEventType.KeyDown || event.key != Key.DirectionUp) return@onPreviewKeyEvent false
+                                if (filtersAvailable) filtersFocusRequester.requestFocus()
+                                true
+                            },
                         colors = ClickableSurfaceDefaults.colors(
                             containerColor = TileBg,
                             focusedContainerColor = Color(0xFF2E2F45),
