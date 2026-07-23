@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
@@ -107,6 +108,13 @@ fun PlayerScreen(
                 MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(subUrl))
                     .setMimeType(MimeTypes.TEXT_VTT)
                     .setLanguage(selected?.language?.takeIf { it.isNotEmpty() } ?: "und")
+                    // Sideloaded tracks are otherwise available-but-inactive —
+                    // ExoPlayer's DefaultTrackSelector only auto-enables a text
+                    // track carrying this flag, same role HTML's <track default>
+                    // plays for hls.js/Safari on the web client. Safe to always
+                    // set here since this whole block only runs when the server
+                    // already resolved a subtitle selection into a sidecar URL.
+                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                     .build(),
             ))
         }
