@@ -1,5 +1,6 @@
 package com.pantheon.android.player
 
+import android.view.View
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -10,9 +11,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -215,6 +219,11 @@ fun PlayerScreen(
     // same "seek is a new session" design as usePlaybackSession.ts's reload()
     // — this dialog is this app's counterpart to TrackMenu.tsx.
     var trackMenuOpen by remember { mutableStateOf(false) }
+    // Mirrors the native controller's own auto-hide state (media3 fades its
+    // transport bar after a few seconds idle) — without this the button sat
+    // permanently overlaid on the video regardless of whether the rest of
+    // the controls were showing.
+    var controlsVisible by remember { mutableStateOf(true) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         if (viewModel.manifestUrl != null) {
@@ -224,6 +233,20 @@ fun PlayerScreen(
                         player = exoPlayer
                         useController = true
                         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                        // media3's default controller ships its own gear
+                        // (exo_settings, playback-speed only) alongside our
+                        // "Audio & Subtitles" gear below — two settings icons
+                        // for one concept. Track switching here is a new VOD
+                        // session (see trackMenuOpen's comment), not a
+                        // client-side TrackSelector pick, so the native
+                        // settings menu has nothing useful to add; hide it so
+                        // there's a single gear.
+                        findViewById<View>(androidx.media3.ui.R.id.exo_settings)?.visibility = View.GONE
+                        setControllerVisibilityListener(
+                            PlayerView.ControllerVisibilityListener { visibility ->
+                                controlsVisible = visibility == View.VISIBLE
+                            },
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
@@ -236,7 +259,7 @@ fun PlayerScreen(
             Text(message, color = Color.White, modifier = Modifier.align(Alignment.Center))
         }
 
-        if (!viewModel.isLive && viewModel.manifestUrl != null) {
+        if (!viewModel.isLive && viewModel.manifestUrl != null && controlsVisible) {
             TextButton(
                 onClick = { trackMenuOpen = true },
                 modifier = Modifier.align(Alignment.TopEnd).padding(top = 40.dp, end = 8.dp),
@@ -345,7 +368,13 @@ private fun TrackSelectionDialog(
 ) {
     Dialog(onDismissRequest = onClose) {
         Surface(color = Color(0xFF1B1C29), shape = RoundedCornerShape(12.dp)) {
-            Column(modifier = Modifier.padding(20.dp).width(300.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .width(300.dp)
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
                 Text("Audio", color = Color.White, style = MaterialTheme.typography.titleMedium)
                 val audioTracks = tracks?.audio.orEmpty()
                 if (audioTracks.isEmpty()) {
