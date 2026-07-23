@@ -51,6 +51,12 @@ data class WatchProgressBody(
     @SerializedName("position_ms") val positionMs: Long,
     @SerializedName("duration_ms") val durationMs: Long,
     val completed: Boolean? = null,
+    // Both optional — feed Kairos's local play-history table (see
+    // PlaybackHistoryRepository) alongside pings this call already sends,
+    // not a new event-reporting pipeline. Nothing client-side reads them
+    // back.
+    @SerializedName("device_type") val deviceType: String? = null,
+    @SerializedName("direct_play") val directPlay: Boolean? = null,
 )
 
 // POST /stream/client-capabilities -- this device's real decode capability

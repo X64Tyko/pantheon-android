@@ -5,6 +5,7 @@ import com.pantheon.android.api.dto.AuthUser
 import com.pantheon.android.api.dto.Channel
 import com.pantheon.android.api.dto.ChannelAccessResponse
 import com.pantheon.android.api.dto.ClientCapabilitiesRequest
+import com.pantheon.android.api.dto.ClientLogBody
 import com.pantheon.android.api.dto.Episode
 import com.pantheon.android.api.dto.EpgProgram
 import com.pantheon.android.api.dto.FilterValuesResponse
@@ -140,6 +141,11 @@ interface KairosApi {
 
     @DELETE("stream/client-capabilities")
     suspend fun forgetClientCapabilities(): Response<Unit>
+
+    // Mirrors hades/src/api/client.ts's sendClientLog — see ClientLogBody's
+    // own comment. Used by PantheonApplication's uncaught-exception handler.
+    @POST("api/logs/client")
+    suspend fun sendClientLog(@Body body: ClientLogBody): Response<Unit>
 
     @PUT("api/watch-progress/{contentType}/{id}")
     suspend fun putWatchProgress(@Path("contentType") contentType: String, @Path("id") id: String, @Body body: WatchProgressBody): Response<Unit>

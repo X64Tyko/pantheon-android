@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.pantheon.android.BuildConfig
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.NextEpisode
 import com.pantheon.android.api.dto.VodStartRequest
@@ -16,6 +17,14 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+
+// "android-tv" vs "android-mobile" — this file is shared by both formFactor
+// flavors (see build.gradle.kts's flavorDimensions), so BuildConfig.FLAVOR
+// (e.g. "googleTv"/"amazonMobile") is the only thing distinguishing them at
+// runtime. Feeds Kairos's local play-history table (device_type column),
+// nothing client-side reads it back.
+private val deviceType: String =
+    if (BuildConfig.FLAVOR.contains("Tv", ignoreCase = true)) "android-tv" else "android-mobile"
 
 // Kotlin counterpart of hades/src/player/usePlaybackSession.ts, including its
 // reload()-based track-switch: a track switch and a seek are the same
@@ -64,6 +73,8 @@ class PlayerViewModel(
     var audioTrack by mutableStateOf(-1)
         private set
     var subtitleTrack by mutableStateOf(-1)
+        private set
+    var directPlay by mutableStateOf(false)
         private set
 
     val isLive: Boolean get() = kind == "channel"
@@ -136,6 +147,7 @@ class PlayerViewModel(
                 title = res.title
                 durationMs = res.durationMs
                 tracks = res.tracks
+                directPlay = res.directPlay
                 audioTrack = if (aTrack >= 0) aTrack else (res.tracks?.audio?.firstOrNull()?.index ?: -1)
                 subtitleTrack = sTrack
             }.onFailure { e ->
@@ -174,14 +186,18 @@ class PlayerViewModel(
         if (isLive || durationMs <= 0) return
         val absolute = basePositionMs + playerPositionMs
         if (absolute <= 0) return
-        viewModelScope.launch { runCatching { apiClient.service.putWatchProgress(kind, contentId, WatchProgressBody(absolute, durationMs)) } }
+        viewModelScope.launch { runCatching {
+            apiClient.service.putWatchProgress(kind, contentId, WatchProgressBody(absolute, durationMs, deviceType = deviceType, directPlay = directPlay))
+        } }
     }
 
     // Natural end-of-content — explicit completed=true, same as
     // PlayerPage.tsx's handleNaturalEnd/handleAdvanceToNext.
     fun reportCompleted() {
         if (isLive || durationMs <= 0) return
-        viewModelScope.launch { runCatching { apiClient.service.putWatchProgress(kind, contentId, WatchProgressBody(durationMs, durationMs, completed = true)) } }
+        viewModelScope.launch { runCatching {
+            apiClient.service.putWatchProgress(kind, contentId, WatchProgressBody(durationMs, durationMs, completed = true, deviceType = deviceType, directPlay = directPlay))
+        } }
     }
 
     // GlobalScope deliberate — see GuideViewModel.stopCurrentPreview()'s
