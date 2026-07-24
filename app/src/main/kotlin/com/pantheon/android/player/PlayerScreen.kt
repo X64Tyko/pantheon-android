@@ -42,6 +42,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -383,73 +385,94 @@ private fun TrackSelectionDialog(
         return "$kind $fallbackIndex"
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0x99000000))
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.CenterEnd,
-    ) {
-        Column(
+    // A plain Box here (the original implementation) is the exact bug
+    // TvFilterPanel.kt already hit and documented: painted on top visually
+    // (last child in composition order) but not a separate focus scope, so
+    // D-pad input kept landing on whatever the player's transport controls
+    // had focused underneath — the dialog never actually became
+    // interactive via D-pad, and the hardware Back button fell through to
+    // PlayerScreen's own BackHandler (exiting playback) instead of closing
+    // this. A real Dialog renders in its own window, always on top
+    // regardless of composition order and becomes the active window for
+    // focus/back purposes — onDismissRequest fires for both an outside tap
+    // and the system Back button, so no separate BackHandler is needed here.
+    val firstRowFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { firstRowFocusRequester.requestFocus() }
+    var focusAssigned = false
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(
             modifier = Modifier
-                .width(320.dp)
-                .heightIn(max = 480.dp)
-                .padding(24.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color(0xEE1B1C29))
-                .clickable(onClick = {}) // swallow taps so they don't fall through to the scrim's dismiss above
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .fillMaxSize()
+                .background(Color(0x99000000))
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.CenterEnd,
         ) {
-            Text("Audio", color = TextDim, style = MaterialTheme.typography.labelSmall)
-            if (audioGroups.isEmpty()) {
-                Text(
-                    "No audio tracks found", color = TextDim, style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 6.dp, bottom = 12.dp),
-                )
-            }
-            audioGroups.forEachIndexed { groupIdx, group ->
-                for (i in 0 until group.length) {
-                    val format = group.getTrackFormat(i)
-                    val selected = group.isTrackSelected(i)
+            Column(
+                modifier = Modifier
+                    .width(320.dp)
+                    .heightIn(max = 480.dp)
+                    .padding(24.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xEE1B1C29))
+                    .clickable(onClick = {}) // swallow taps so they don't fall through to the scrim's dismiss above
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+            ) {
+                Text("Audio", color = TextDim, style = MaterialTheme.typography.labelSmall)
+                if (audioGroups.isEmpty()) {
                     Text(
-                        trackLabel(format, groupIdx, "Audio"),
-                        color = if (selected) GoldColor else Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { selectAudio(group, i) }
-                            .padding(vertical = 8.dp),
+                        "No audio tracks found", color = TextDim, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 12.dp),
                     )
                 }
-            }
-
-            Text(
-                "Subtitles", color = TextDim, style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-            Text(
-                "Off",
-                color = if (subtitlesOff) GoldColor else Color.White,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { disableSubtitles() }
-                    .padding(vertical = 8.dp),
-            )
-            textGroups.forEachIndexed { groupIdx, group ->
-                for (i in 0 until group.length) {
-                    val format = group.getTrackFormat(i)
-                    val selected = !subtitlesOff && group.isTrackSelected(i)
-                    Text(
-                        trackLabel(format, groupIdx, "Subtitle"),
-                        color = if (selected) GoldColor else Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier
+                audioGroups.forEachIndexed { groupIdx, group ->
+                    for (i in 0 until group.length) {
+                        val format = group.getTrackFormat(i)
+                        val selected = group.isTrackSelected(i)
+                        var rowModifier = Modifier
                             .fillMaxWidth()
-                            .clickable { selectSubtitle(group, i) }
-                            .padding(vertical = 8.dp),
+                            .clickable { selectAudio(group, i) }
+                        if (!focusAssigned) { rowModifier = rowModifier.focusRequester(firstRowFocusRequester); focusAssigned = true }
+                        Text(
+                            trackLabel(format, groupIdx, "Audio"),
+                            color = if (selected) GoldColor else Color.White,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = rowModifier.padding(vertical = 8.dp),
+                        )
+                    }
+                }
+
+                Text(
+                    "Subtitles", color = TextDim, style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                run {
+                    var offModifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { disableSubtitles() }
+                    if (!focusAssigned) { offModifier = offModifier.focusRequester(firstRowFocusRequester); focusAssigned = true }
+                    Text(
+                        "Off",
+                        color = if (subtitlesOff) GoldColor else Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = offModifier.padding(vertical = 8.dp),
                     )
+                }
+                textGroups.forEachIndexed { groupIdx, group ->
+                    for (i in 0 until group.length) {
+                        val format = group.getTrackFormat(i)
+                        val selected = !subtitlesOff && group.isTrackSelected(i)
+                        Text(
+                            trackLabel(format, groupIdx, "Subtitle"),
+                            color = if (selected) GoldColor else Color.White,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectSubtitle(group, i) }
+                                .padding(vertical = 8.dp),
+                        )
+                    }
                 }
             }
         }
