@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.io.IOException
 
 // Rebuildable per-server-URL Retrofit client — the URL isn't known at build
 // time (direct-connection mode, see project plan §7: a user-entered Hermes
@@ -64,8 +65,37 @@ class ApiClient(private val tokenStore: TokenStore) {
             tokenStore.token?.let { builder.addHeader("Authorization", "Bearer $it") }
             chain.proceed(builder.build())
         }
+        // Broad, central error-forwarding (see RemoteLog's own comment) —
+        // network failures and 5xx server errors, on every request this app
+        // makes, without touching each individual call site. 4xx is
+        // deliberately excluded: those are routinely expected/handled
+        // outcomes (an optional lookup 404ing, a token refresh 401) rather
+        // than genuine failures, and logging every one would bury real
+        // problems in noise. Skips the log endpoint's own path outright —
+        // a failed sendClientLog call re-entering this same interceptor
+        // would otherwise recurse into logging its own failure forever.
+        val errorReportingInterceptor = Interceptor { chain: Interceptor.Chain ->
+            val request = chain.request()
+            if (request.url.encodedPath.contains("/logs/client")) {
+                chain.proceed(request)
+            } else {
+                try {
+                    val response = chain.proceed(request)
+                    if (response.code >= 500) {
+                        RemoteLog.error(this, tokenStore.currentUserId, "api",
+                            "${request.method} ${request.url.encodedPath} -> ${response.code}")
+                    }
+                    response
+                } catch (e: IOException) {
+                    RemoteLog.error(this, tokenStore.currentUserId, "api",
+                        "${request.method} ${request.url.encodedPath} failed: ${e.message}")
+                    throw e
+                }
+            }
+        }
         val okHttp = OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
+            .addInterceptor(errorReportingInterceptor)
             .build()
         return Retrofit.Builder()
             .baseUrl(baseUrl)

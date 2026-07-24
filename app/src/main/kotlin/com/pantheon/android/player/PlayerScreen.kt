@@ -3,8 +3,12 @@ package com.pantheon.android.player
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,9 +18,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -396,9 +400,44 @@ private fun TrackSelectionDialog(
     // regardless of composition order and becomes the active window for
     // focus/back purposes — onDismissRequest fires for both an outside tap
     // and the system Back button, so no separate BackHandler is needed here.
+    //
+    // Getting a real Dialog window wasn't the whole story, though: the rows
+    // themselves were plain Text().clickable{} inside a Column+verticalScroll
+    // — this codebase's own established D-pad pattern (TvFilterPanel.kt)
+    // never does that directly, it uses dedicated components (TvTextButton,
+    // TvChip) over a LazyColumn. Two concrete gaps that leaves: (1) plain
+    // clickable's default indication is a touch ripple that only flashes on
+    // press, so a D-pad-focused-but-not-yet-pressed row renders completely
+    // identically to an unfocused one — focus may well have been moving
+    // correctly the whole time with literally nothing on screen to show it;
+    // (2) Modifier.verticalScroll only responds to pointer input, not focus
+    // changes, so a focused row scrolled out of the visible area never gets
+    // brought back into view the way LazyColumn's built-in focus-aware
+    // scrolling does. Rebuilt below as a LazyColumn of TrackRow, which
+    // renders its own persistent gold border/background while focused
+    // (not just on press) on top of the normal touch ripple.
     val firstRowFocusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { firstRowFocusRequester.requestFocus() }
-    var focusAssigned = false
+
+    val entries = buildList {
+        add(TrackMenuEntry.Header("Audio"))
+        if (audioGroups.isEmpty()) add(TrackMenuEntry.Empty("No audio tracks found"))
+        audioGroups.forEachIndexed { groupIdx, group ->
+            for (i in 0 until group.length) {
+                val format = group.getTrackFormat(i)
+                add(TrackMenuEntry.Row(trackLabel(format, groupIdx, "Audio"), group.isTrackSelected(i)) { selectAudio(group, i) })
+            }
+        }
+        add(TrackMenuEntry.Header("Subtitles"))
+        add(TrackMenuEntry.Row("Off", subtitlesOff) { disableSubtitles() })
+        textGroups.forEachIndexed { groupIdx, group ->
+            for (i in 0 until group.length) {
+                val format = group.getTrackFormat(i)
+                add(TrackMenuEntry.Row(trackLabel(format, groupIdx, "Subtitle"), !subtitlesOff && group.isTrackSelected(i)) { selectSubtitle(group, i) })
+            }
+        }
+    }
+    val firstRowIndex = entries.indexOfFirst { it is TrackMenuEntry.Row }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(
@@ -408,7 +447,7 @@ private fun TrackSelectionDialog(
                 .clickable(onClick = onDismiss),
             contentAlignment = Alignment.CenterEnd,
         ) {
-            Column(
+            LazyColumn(
                 modifier = Modifier
                     .width(320.dp)
                     .heightIn(max = 480.dp)
@@ -416,65 +455,55 @@ private fun TrackSelectionDialog(
                     .clip(RoundedCornerShape(10.dp))
                     .background(Color(0xEE1B1C29))
                     .clickable(onClick = {}) // swallow taps so they don't fall through to the scrim's dismiss above
-                    .verticalScroll(rememberScrollState())
                     .padding(16.dp),
             ) {
-                Text("Audio", color = TextDim, style = MaterialTheme.typography.labelSmall)
-                if (audioGroups.isEmpty()) {
-                    Text(
-                        "No audio tracks found", color = TextDim, style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 6.dp, bottom = 12.dp),
-                    )
-                }
-                audioGroups.forEachIndexed { groupIdx, group ->
-                    for (i in 0 until group.length) {
-                        val format = group.getTrackFormat(i)
-                        val selected = group.isTrackSelected(i)
-                        var rowModifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { selectAudio(group, i) }
-                        if (!focusAssigned) { rowModifier = rowModifier.focusRequester(firstRowFocusRequester); focusAssigned = true }
-                        Text(
-                            trackLabel(format, groupIdx, "Audio"),
-                            color = if (selected) GoldColor else Color.White,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = rowModifier.padding(vertical = 8.dp),
+                itemsIndexed(entries) { idx, entry ->
+                    when (entry) {
+                        is TrackMenuEntry.Header -> Text(
+                            entry.text, color = TextDim, style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(top = if (idx == 0) 0.dp else 12.dp),
                         )
-                    }
-                }
-
-                Text(
-                    "Subtitles", color = TextDim, style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-                run {
-                    var offModifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { disableSubtitles() }
-                    if (!focusAssigned) { offModifier = offModifier.focusRequester(firstRowFocusRequester); focusAssigned = true }
-                    Text(
-                        "Off",
-                        color = if (subtitlesOff) GoldColor else Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = offModifier.padding(vertical = 8.dp),
-                    )
-                }
-                textGroups.forEachIndexed { groupIdx, group ->
-                    for (i in 0 until group.length) {
-                        val format = group.getTrackFormat(i)
-                        val selected = !subtitlesOff && group.isTrackSelected(i)
-                        Text(
-                            trackLabel(format, groupIdx, "Subtitle"),
-                            color = if (selected) GoldColor else Color.White,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { selectSubtitle(group, i) }
-                                .padding(vertical = 8.dp),
+                        is TrackMenuEntry.Empty -> Text(
+                            entry.text, color = TextDim, style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(vertical = 6.dp),
+                        )
+                        is TrackMenuEntry.Row -> TrackRow(
+                            label = entry.label,
+                            selected = entry.selected,
+                            onClick = entry.onSelect,
+                            modifier = if (idx == firstRowIndex) Modifier.focusRequester(firstRowFocusRequester) else Modifier,
                         )
                     }
                 }
             }
         }
     }
+}
+
+private sealed interface TrackMenuEntry {
+    data class Header(val text: String) : TrackMenuEntry
+    data class Empty(val text: String) : TrackMenuEntry
+    data class Row(val label: String, val selected: Boolean, val onSelect: () -> Unit) : TrackMenuEntry
+}
+
+// Persistent gold border/background while D-pad-focused, on top of (not
+// instead of) the normal touch ripple — see TrackSelectionDialog's own
+// comment on why a plain clickable Text row was invisible to D-pad
+// navigation in practice even once it actually had focus.
+@Composable
+private fun TrackRow(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    Text(
+        label,
+        color = if (selected) GoldColor else Color.White,
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (isFocused) Color(0x33E0B84E) else Color.Transparent)
+            .border(if (isFocused) 2.dp else 0.dp, if (isFocused) GoldColor else Color.Transparent, RoundedCornerShape(6.dp))
+            .clickable(interactionSource = interactionSource, indication = LocalIndication.current, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    )
 }
