@@ -1,5 +1,6 @@
 package com.pantheon.android.player
 
+import android.view.View
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -10,9 +11,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -39,8 +43,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
@@ -147,6 +154,13 @@ fun PlayerScreen(
         onAdvanceToNext(next.episodeId)
     }
 
+    // Drives TrackSelectionDialog below — Tracks is a live snapshot, not
+    // observable on its own, so it has to be mirrored into Compose state via
+    // the same onTracksChanged callback ExoPlayer already fires whenever the
+    // manifest's AUDIO/SUBTITLES groups become known or the active selection
+    // changes (including from our own dialog's overrides re-triggering it).
+    var currentTracks by remember { mutableStateOf(Tracks.EMPTY) }
+
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
@@ -154,10 +168,15 @@ fun PlayerScreen(
                 val next = viewModel.nextEpisode
                 if (next != null && !viewModel.upNextDismissed) advance(next) else viewModel.reportCompleted()
             }
+            override fun onTracksChanged(tracks: Tracks) {
+                currentTracks = tracks
+            }
         }
         exoPlayer.addListener(listener)
         onDispose { exoPlayer.removeListener(listener) }
     }
+
+    var showTrackMenu by remember { mutableStateOf(false) }
 
     // Local, UI-only position polling — separate from the 15s network-ping
     // cadence above, just to drive the Up Next overlay's near-end check
@@ -191,12 +210,22 @@ fun PlayerScreen(
                         player = exoPlayer
                         useController = true
                         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                        // media3's default gear (exo_settings) now drives
-                        // audio/subtitle track selection itself, straight
-                        // against the master manifest's AUDIO/SUBTITLES
-                        // groups — left visible, no app-level equivalent
-                        // needed anymore.
                     }
+                },
+                // media3's built-in settings gear (exo_settings) drives its
+                // OWN track-selection dialog straight off each manifest
+                // rendition's raw Format (label/language as ExoPlayer itself
+                // derives them) — in practice this collapsed every subtitle
+                // entry to the same-looking row and never listed audio
+                // languages at all. Rather than fight that dialog, the gear
+                // stays in place (same icon, same show/hide-with-controls
+                // behavior) but gets rebound to open TrackSelectionDialog
+                // below instead. update runs on every recomposition, so this
+                // stays bound even though the controller view is inflated
+                // lazily and may not exist yet on the first pass.
+                update = { view ->
+                    view.findViewById<View>(androidx.media3.ui.R.id.exo_settings)
+                        ?.setOnClickListener { showTrackMenu = true }
                 },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -216,6 +245,14 @@ fun PlayerScreen(
                 onPlayNow = { advance(next) },
                 onDismiss = { viewModel.dismissUpNext() },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
+            )
+        }
+
+        if (showTrackMenu) {
+            TrackSelectionDialog(
+                exoPlayer = exoPlayer,
+                tracks = currentTracks,
+                onDismiss = { showTrackMenu = false },
             )
         }
     }
@@ -284,3 +321,120 @@ private fun UpNextOverlay(
     }
 }
 
+// Replaces media3's own settings-gear track dialog (see PlayerScreen's
+// AndroidView update block for why) — built straight off ExoPlayer's live
+// Tracks/Format objects rather than re-deriving Pantheon's own index scheme
+// the way Hades has to (see hades/src/player/VideoPlayer.tsx's
+// X-PANTHEON-INDEX comment). media3's HLS parser doesn't expose arbitrary
+// #EXT-X-MEDIA "X-" attributes the way hls.js does, but it doesn't need to
+// here: Format.label/language (from the manifest's own NAME/LANGUAGE) are
+// already distinct per rendition, and TrackSelectionOverride targets the
+// real TrackGroup object directly instead of a numeric index translation.
+@Composable
+private fun TrackSelectionDialog(
+    exoPlayer: ExoPlayer,
+    tracks: Tracks,
+    onDismiss: () -> Unit,
+) {
+    val audioGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+    val textGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+    val subtitlesOff = exoPlayer.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
+
+    fun selectAudio(group: Tracks.Group, index: Int) {
+        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
+            .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index))
+            .build()
+    }
+
+    fun selectSubtitle(group: Tracks.Group, index: Int) {
+        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index))
+            .build()
+    }
+
+    fun disableSubtitles() {
+        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+    }
+
+    fun trackLabel(format: androidx.media3.common.Format, fallbackIndex: Int, kind: String): String {
+        format.label?.let { if (it.isNotBlank()) return it }
+        format.language?.let { if (it.isNotBlank()) return it.uppercase() }
+        return "$kind $fallbackIndex"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0x99000000))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Column(
+            modifier = Modifier
+                .width(320.dp)
+                .heightIn(max = 480.dp)
+                .padding(24.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xEE1B1C29))
+                .clickable(onClick = {}) // swallow taps so they don't fall through to the scrim's dismiss above
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+        ) {
+            Text("Audio", color = TextDim, style = MaterialTheme.typography.labelSmall)
+            if (audioGroups.isEmpty()) {
+                Text(
+                    "No audio tracks found", color = TextDim, style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 12.dp),
+                )
+            }
+            audioGroups.forEachIndexed { groupIdx, group ->
+                for (i in 0 until group.length) {
+                    val format = group.getTrackFormat(i)
+                    val selected = group.isTrackSelected(i)
+                    Text(
+                        trackLabel(format, groupIdx, "Audio"),
+                        color = if (selected) GoldColor else Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectAudio(group, i) }
+                            .padding(vertical = 8.dp),
+                    )
+                }
+            }
+
+            Text(
+                "Subtitles", color = TextDim, style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            Text(
+                "Off",
+                color = if (subtitlesOff) GoldColor else Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { disableSubtitles() }
+                    .padding(vertical = 8.dp),
+            )
+            textGroups.forEachIndexed { groupIdx, group ->
+                for (i in 0 until group.length) {
+                    val format = group.getTrackFormat(i)
+                    val selected = !subtitlesOff && group.isTrackSelected(i)
+                    Text(
+                        trackLabel(format, groupIdx, "Subtitle"),
+                        color = if (selected) GoldColor else Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectSubtitle(group, i) }
+                            .padding(vertical = 8.dp),
+                    )
+                }
+            }
+        }
+    }
+}
