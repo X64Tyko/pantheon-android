@@ -360,9 +360,26 @@ private fun TrackSelectionDialog(
             .build()
     }
 
+    // Hephaestus's manifest (VodSession::buildMasterPlaylist) sets NAME to
+    // the track's real title tag when one exists, but falls back to the raw
+    // language code itself (e.g. "eng", "spa") when it doesn't — media3
+    // parses that verbatim into Format.label, so a label that's just the
+    // same string as Format.language isn't a real title, it's that fallback
+    // showing through. Locale resolves ISO 639-1/639-2 codes (both forms
+    // Hephaestus can emit, depending on what ffprobe tagged the source with)
+    // to a real display name via Android's own ICU data.
     fun trackLabel(format: androidx.media3.common.Format, fallbackIndex: Int, kind: String): String {
-        format.label?.let { if (it.isNotBlank()) return it }
-        format.language?.let { if (it.isNotBlank()) return it.uppercase() }
+        val label = format.label?.trim()
+        val lang = format.language?.trim()
+        if (!label.isNullOrBlank() && !label.equals(lang, ignoreCase = true)) return label
+        if (!lang.isNullOrBlank()) {
+            val displayName = java.util.Locale(lang).displayLanguage
+            // displayLanguage silently echoes back an unresolvable code
+            // instead of erroring — falls through to the raw code in that
+            // case rather than showing something that looks resolved but isn't.
+            if (displayName.isNotBlank() && !displayName.equals(lang, ignoreCase = true)) return displayName
+            return lang.uppercase()
+        }
         return "$kind $fallbackIndex"
     }
 
