@@ -20,7 +20,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val app = application as PantheonApplication
         setContent {
-            PantheonTheme {
+            PantheonTheme(apiClient = app.apiClient) {
                 PantheonNavHost(tokenStore = app.tokenStore, apiClient = app.apiClient)
             }
         }

@@ -94,8 +94,24 @@ fun LibraryScreen(
     // it) so the BackHandler beneath it can reach them too.
     var searchEditing by remember { mutableStateOf(false) }
     var searchButtonFocused by remember { mutableStateOf(false) }
-    val searchFocusRequester = remember { FocusRequester() }
+    // Two requesters, not one — the outer Surface (searchOuterFocusRequester)
+    // stays mounted across the whole editing/not-editing lifetime; only its
+    // CONTENT (Text vs. OutlinedTextField) swaps. Previously a single
+    // FocusRequester was attached to two different composables that got
+    // fully disposed/recreated on that same swap, leaving a frame where
+    // nothing was actually focused — Compose's default focus search filled
+    // that gap by landing on the header's "← Back" button (nearest/
+    // first-composed candidate), which is why selecting search silently
+    // kicked focus away and made it impossible to type. Keeping the outer
+    // node alive means D-pad traversal always has a stable target here;
+    // only the deliberate editing<->not-editing handoff (via the
+    // LaunchedEffect below) ever moves focus onto/off of the inner field.
+    val searchOuterFocusRequester = remember { FocusRequester() }
+    val searchFieldFocusRequester = remember { FocusRequester() }
     val searchHasFocus = searchEditing || searchButtonFocused
+    LaunchedEffect(searchEditing) {
+        if (searchEditing) searchFieldFocusRequester.requestFocus()
+    }
     // Up from the search row falls through to Compose's default 2-D focus
     // search unless routed explicitly. The header's "← Back" button is
     // nearly always the only (or geometrically nearest/first-composed)
@@ -108,6 +124,16 @@ fun LibraryScreen(
     // conditional).
     val filtersFocusRequester = remember { FocusRequester() }
     val filtersAvailable = viewModel.filterFields.isNotEmpty() || viewModel.libraries.isNotEmpty() || viewModel.sortOptions.isNotEmpty()
+
+    // Claims initial D-pad focus for the search bar once its zone is known
+    // to exist — LibraryScreen previously made no such claim at all (unlike
+    // Detail/TvFilterPanel, which both do this for their own primary
+    // control on entry), leaving Compose's default focus search to pick
+    // whatever it considered nearest on first composition too.
+    val searchZoneAvailable = viewModel.hasZone("search-bar")
+    LaunchedEffect(searchZoneAvailable) {
+        if (searchZoneAvailable) searchOuterFocusRequester.requestFocus()
+    }
 
     // First Back press while browsing anywhere else on this screen (a grid
     // tile, the Filters button, ...) snaps D-pad focus to the search bar
@@ -122,7 +148,7 @@ fun LibraryScreen(
     // dispatcher-level handler) or TvFilterPanel's Back-to-close (its
     // Dialog owns a separate window/back-dispatcher scope entirely).
     BackHandler(enabled = viewModel.hasZone("search-bar") && !searchHasFocus) {
-        searchFocusRequester.requestFocus()
+        searchOuterFocusRequester.requestFocus()
     }
 
     LaunchedEffect(gridState) {
@@ -176,67 +202,62 @@ fun LibraryScreen(
             }
 
             if (viewModel.hasZone("search-bar")) {
-                if (searchEditing) {
-                    LaunchedEffect(Unit) { searchFocusRequester.requestFocus() }
-                    // A plain Material3 TextField swallows DPAD up/down as cursor
-                    // movement once focused, so D-pad navigation dead-ends there
-                    // with no way to continue to the rest of the screen — a real
-                    // TV-only trap not present on touch/mouse input. Intercept
-                    // those two keys ahead of the field's own handling and drive
-                    // normal Compose focus traversal instead; everything else
-                    // (typing, left/right cursor movement) still reaches the
-                    // field untouched. Back collapses back to the button below
-                    // instead of leaving the whole Library screen — the field
-                    // losing focus for any reason (Up/Down/Back) collapses it,
-                    // one rule instead of three separate special cases.
-                    OutlinedTextField(
-                        value = viewModel.query,
-                        onValueChange = viewModel::onQueryChange,
-                        placeholder = { androidx.compose.material3.Text("Search library…") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp)
-                            .focusRequester(searchFocusRequester)
-                            .onFocusChanged { if (!it.isFocused) searchEditing = false }
-                            .onPreviewKeyEvent { event ->
-                                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                when (event.key) {
-                                    Key.DirectionDown -> { focusManager.moveFocus(FocusDirection.Down); true }
-                                    // Not moveFocus(Up) — see filtersFocusRequester's own
-                                    // comment above for why that lands on "← Back" instead.
-                                    Key.DirectionUp -> { if (filtersAvailable) filtersFocusRequester.requestFocus(); true }
-                                    Key.Back -> { searchEditing = false; true }
-                                    else -> false
-                                }
-                            },
-                    )
-                } else {
-                    // Search only becomes an actual editable field — and only
-                    // then shows the software keyboard — once explicitly
-                    // selected (DPAD_CENTER), not merely when D-pad focus
-                    // traversal lands here. A plain Compose TextField shows
-                    // the keyboard on FOCUS alone, which on a D-pad remote
-                    // fires just from navigating past this row on the way to
-                    // something else — a real TV-only annoyance touch/mouse
-                    // input never has.
-                    Surface(
-                        onClick = { searchEditing = true },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp)
-                            .focusRequester(searchFocusRequester)
-                            .onFocusChanged { searchButtonFocused = it.isFocused }
-                            // Same "← Back" trap as the editing field's own
-                            // handler above — default Up-navigation out of this
-                            // full-width row has the same nearest-candidate
-                            // problem even when it's not yet an editable field.
-                            .onPreviewKeyEvent { event ->
-                                if (event.type != KeyEventType.KeyDown || event.key != Key.DirectionUp) return@onPreviewKeyEvent false
-                                if (filtersAvailable) filtersFocusRequester.requestFocus()
-                                true
-                            },
-                        colors = ClickableSurfaceDefaults.colors(
-                            containerColor = TileBg,
-                            focusedContainerColor = Color(0xFF2E2F45),
-                        ),
-                    ) {
+                // Search only becomes an actual editable field — and only then
+                // shows the software keyboard — once explicitly selected
+                // (DPAD_CENTER), not merely when D-pad focus traversal lands
+                // here. A plain Compose TextField shows the keyboard on FOCUS
+                // alone, which on a D-pad remote fires just from navigating
+                // past this row on the way to something else — a real
+                // TV-only annoyance touch/mouse input never has. This outer
+                // Surface is what stays mounted/focusable the whole time;
+                // only its content below swaps between the two states.
+                Surface(
+                    onClick = { searchEditing = true },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp)
+                        .focusRequester(searchOuterFocusRequester)
+                        .onFocusChanged { searchButtonFocused = it.isFocused }
+                        .onPreviewKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown || event.key != Key.DirectionUp) return@onPreviewKeyEvent false
+                            if (filtersAvailable) filtersFocusRequester.requestFocus()
+                            true
+                        },
+                    colors = ClickableSurfaceDefaults.colors(
+                        containerColor = TileBg,
+                        focusedContainerColor = Color(0xFF2E2F45),
+                    ),
+                ) {
+                    if (searchEditing) {
+                        // A plain Material3 TextField swallows DPAD up/down as
+                        // cursor movement once focused, so D-pad navigation
+                        // dead-ends there with no way to continue to the rest
+                        // of the screen — intercept those two keys ahead of
+                        // the field's own handling and drive normal Compose
+                        // focus traversal instead; everything else (typing,
+                        // left/right cursor movement) still reaches the field
+                        // untouched. Losing focus for any reason (Up/Down/
+                        // Back, or tapping elsewhere) collapses back to the
+                        // button look via the outer Surface's own state.
+                        OutlinedTextField(
+                            value = viewModel.query,
+                            onValueChange = viewModel::onQueryChange,
+                            placeholder = { androidx.compose.material3.Text("Search library…") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                                .focusRequester(searchFieldFocusRequester)
+                                .onFocusChanged { if (!it.isFocused) searchEditing = false }
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    when (event.key) {
+                                        Key.DirectionDown -> { focusManager.moveFocus(FocusDirection.Down); true }
+                                        // Not moveFocus(Up) — see filtersFocusRequester's own
+                                        // comment above for why that lands on "← Back" instead.
+                                        Key.DirectionUp -> { if (filtersAvailable) filtersFocusRequester.requestFocus(); true }
+                                        Key.Back -> { searchEditing = false; true }
+                                        else -> false
+                                    }
+                                },
+                        )
+                    } else {
                         Text(
                             viewModel.query.ifEmpty { "Search library…" },
                             color = if (viewModel.query.isEmpty()) TextDim else Color.White,

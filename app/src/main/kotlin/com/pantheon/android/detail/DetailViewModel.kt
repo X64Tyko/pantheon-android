@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 
 data class SeasonGroup(val number: Int, val name: String, val episodes: List<Episode>)
 
+private val DEFAULT_META_FIELDS = listOf("year", "rating", "content_type")
+
 // Kotlin counterpart of hades/src/tv/useZoneManifest.ts('detail') +
 // components/media/useMediaDetail.ts. Only the 'season' episode grouping is
 // implemented (sorted by season/episode number) — useMediaDetail.ts's
@@ -29,6 +31,13 @@ class DetailViewModel(private val apiClient: ApiClient, private val contentType:
     var zones by mutableStateOf<List<TvZone>>(emptyList())
         private set
     fun hasZone(zoneId: String) = zones.any { it.id == zoneId }
+    fun zone(zoneId: String) = zones.find { it.id == zoneId }
+
+    // Which fields the meta-block zone renders (kairos v97) — falls back to
+    // today's fixed set for a manifest that predates the `fields` key, same
+    // "server owns which fields exist" split filterFields/sortOptions use.
+    val metaFields: List<String>
+        get() = zone("meta-block")?.fields?.takeIf { it.isNotEmpty() } ?: DEFAULT_META_FIELDS
 
     var loading by mutableStateOf(true)
         private set

@@ -15,27 +15,11 @@ import com.pantheon.android.api.dto.Show
 import com.pantheon.android.api.dto.TvTheme
 import com.pantheon.android.api.dto.TvZone
 import com.pantheon.android.filter.FilterTreeState
+import com.pantheon.android.ui.theme.color
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.random.Random
-
-// Parses a manifest theme color's hex ("#RRGGBB" or CSS-order "#RRGGBBAA",
-// alpha LAST — see generate-tv-tokens.mjs's toHex()) into a Compose Color.
-// Deliberately not android.graphics.Color.parseColor: that expects Android's
-// own #AARRGGBB (alpha FIRST) packing, which would silently misread an
-// 8-digit CSS hex's bytes as the wrong channels.
-private fun parseCssHex(hex: String): Color? = try {
-    val h = hex.removePrefix("#")
-    when (h.length) {
-        6 -> Color(h.substring(0, 2).toInt(16), h.substring(2, 4).toInt(16), h.substring(4, 6).toInt(16))
-        8 -> Color(
-            h.substring(0, 2).toInt(16), h.substring(2, 4).toInt(16),
-            h.substring(4, 6).toInt(16), h.substring(6, 8).toInt(16),
-        )
-        else -> null
-    }
-} catch (e: NumberFormatException) { null }
 
 private const val PAGE_SIZE = 48
 private const val SEARCH_DEBOUNCE_MS = 300L
@@ -77,8 +61,7 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
     // the manifest hasn't loaded yet, has no theme (fresh checkout before
     // the generator has ever run), or doesn't have this specific token —
     // never a hard failure, the UI always renders something.
-    fun themeColor(token: String, fallback: Color): Color =
-        theme?.tokens?.colors?.get(token)?.hex?.let(::parseCssHex) ?: fallback
+    fun themeColor(token: String, fallback: Color): Color = theme.color(token, fallback)
 
     // The manifest-declared field allowlist for the rule builder's field
     // dropdown — empty until the manifest loads, at which point the filter

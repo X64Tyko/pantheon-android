@@ -10,9 +10,13 @@ data class Channel(
     val name: String,
     val number: Int,
     @SerializedName("logo_path") val logoPath: String? = null,
+    // Admin-assigned rating tag, TV scale; empty/null = unrated. Shown in the
+    // Guide preview header — see GuidePreview.tsx's own comment.
+    @SerializedName("content_tag") val contentTag: String? = null,
 )
 
 data class EpgProgram(
+    @SerializedName("item_id") val itemId: String? = null,
     @SerializedName("item_type") val itemType: String, // "episode" | "movie" | "filler"
     val title: String,
     @SerializedName("show_title") val showTitle: String? = null,
