@@ -8,6 +8,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.pantheon.android.api.ApiClient
+import com.pantheon.android.api.dto.TvDataSource
+import com.pantheon.android.api.dto.TvHeroDataSources
 import com.pantheon.android.api.dto.TvHomeRow
 import com.pantheon.android.api.dto.WatchProgress
 import com.pantheon.android.util.toQueryParams
@@ -62,20 +64,33 @@ class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
                 val manifest = apiClient.service.getTvManifest()
                 rows = manifest.home.rows.sortedBy { it.order }
 
-                val findRow = { id: String -> rows.find { it.id == id } }
-                val shelfRowIds = listOf("recent-shows", "recent-movies", "recent-released", "recent-aired")
-
-                fetchShelfRows(shelfRowIds, findRow)
-
-                val cwRow = findRow("continue-watching")
+                // Every shelf row the manifest declares, not a fixed
+                // client-side allowlist — a shelf Kairos adds/removes only
+                // needs a DB row (see tv_shelf's v81 seed comment), no
+                // client release. continue-watching is a "shelf"-typed row
+                // too, but its data comes from a dedicated endpoint
+                // (getWatchProgress), so it's fetched separately below.
+                val cwRow = rows.find { it.id == "continue-watching" }
                 continueWatching = if (cwRow != null) {
                     runCatching { apiClient.service.getWatchProgress() }.getOrDefault(emptyList())
                 } else emptyList()
 
-                val shows = rowItems["recent-shows"].orEmpty()
-                val movies = rowItems["recent-movies"].orEmpty()
-                heroCandidates = (shows + movies).filter { it.art != null }
-                    .ifEmpty { shows }
+                val shelfRows = rows.filter { it.type == "shelf" && it.id != "continue-watching" }
+                fetchShelfRows(shelfRows)
+
+                // The hero row declares its own two data sources rather than
+                // reusing whatever recent-shows/recent-movies happen to be
+                // configured with (see TvManifestService.cpp's heroRowJson
+                // comment: hero's candidates are a fixed, art-filtered
+                // shows+movies merge, not derived from another row).
+                val heroSources = rows.find { it.type == "hero" }?.dataSources
+                heroCandidates = if (heroSources != null) {
+                    fetchHeroCandidates(heroSources)
+                } else {
+                    val shows = rowItems["recent-shows"].orEmpty()
+                    val movies = rowItems["recent-movies"].orEmpty()
+                    (shows + movies).filter { it.art != null }.ifEmpty { shows }
+                }
                 heroIndex = 0
             } catch (e: Exception) {
                 errorMessage = "Couldn't load Home: ${e.message ?: "unknown error"}"
@@ -85,25 +100,37 @@ class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
         }
     }
 
-    private suspend fun fetchShelfRows(rowIds: List<String>, findRow: (String) -> TvHomeRow?) {
+    private suspend fun fetchShelfRows(rows: List<TvHomeRow>) {
         val results = coroutineScope {
-            rowIds.map { id ->
-                async {
-                    val row = findRow(id) ?: return@async id to emptyList()
-                    val ds = row.dataSource ?: return@async id to emptyList()
-                    val params = toQueryParams(ds.params)
-                    val items: List<HomeMediaItem> = runCatching {
-                        when (ds.endpoint) {
-                            "/api/shows"  -> apiClient.service.getShows(params).items.map { HomeMediaItem.ShowItem(it) }
-                            "/api/movies" -> apiClient.service.getMovies(params).items.map { HomeMediaItem.MovieItem(it) }
-                            else -> throw IllegalStateException("unrecognized shelf dataSource endpoint \"${ds.endpoint}\"")
-                        }
-                    }.getOrDefault(emptyList())
-                    id to items
-                }
-            }.awaitAll()
+            rows.map { row -> async { row.id to fetchDataSource(row.dataSource) } }.awaitAll()
         }
         rowItems = results.toMap()
+    }
+
+    private suspend fun fetchHeroCandidates(sources: TvHeroDataSources): List<HomeMediaItem> {
+        val (shows, movies) = coroutineScope {
+            val showsDeferred = async { fetchDataSource(sources.shows) }
+            val moviesDeferred = async { fetchDataSource(sources.movies) }
+            showsDeferred.await() to moviesDeferred.await()
+        }
+        return (shows + movies).filter { it.art != null }.ifEmpty { shows }
+    }
+
+    // The endpoint vocabulary a shelf/hero dataSource can point at — same
+    // "which fields/endpoints exist is server-owned data" split every other
+    // manifest zone follows. An endpoint this client doesn't recognize
+    // degrades to an empty (rather than crashing) row, same as any other
+    // manifest field a client doesn't yet understand.
+    private suspend fun fetchDataSource(ds: TvDataSource?): List<HomeMediaItem> {
+        if (ds?.endpoint == null) return emptyList()
+        val params = toQueryParams(ds.params)
+        return runCatching {
+            when (ds.endpoint) {
+                "/api/shows"  -> apiClient.service.getShows(params).items.map { HomeMediaItem.ShowItem(it) }
+                "/api/movies" -> apiClient.service.getMovies(params).items.map { HomeMediaItem.MovieItem(it) }
+                else -> emptyList()
+            }
+        }.getOrDefault(emptyList())
     }
 
     companion object {

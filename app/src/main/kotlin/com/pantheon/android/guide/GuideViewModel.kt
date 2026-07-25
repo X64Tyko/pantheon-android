@@ -12,6 +12,7 @@ import com.pantheon.android.api.dto.Channel
 import com.pantheon.android.api.dto.EpgProgram
 import com.pantheon.android.api.dto.PreviewStartRequest
 import com.pantheon.android.api.dto.PreviewSwitchRequest
+import com.pantheon.android.api.dto.TvZone
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -23,33 +24,71 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val SELECT_DEBOUNCE_MS = 300L
-// Small lookback/forward window — unlike hades/src/guide/useGuideSession.ts
-// this screen only ever shows "what's on now" per channel (a channel list,
-// not a full multi-hour time grid — see GuideScreen.kt's own comment for
-// why), so there's no need for WINDOW_FORWARD_HOURS-sized fetches.
-private const val EPG_LOOKBACK_MIN = 5
-private const val EPG_WINDOW_HOURS = 1
+private const val CLOCK_TICK_MS = 30_000L
 
-// Kotlin counterpart of hades/src/guide/useGuideSession.ts, scoped to a
-// channel-list Guide (see GuideScreen.kt). Same live-preview session
-// lifecycle guards (single in-flight start, debounced selection, generation
-// counter to discard a stale start once superseded) — the
+// Matches hades/src/guide/constants.ts's WINDOW_LOOKBACK_MIN/
+// WINDOW_FORWARD_HOURS exactly — a real multi-hour grid (GuideScreen.kt, both
+// flavors) needs the same window web's does, not the old channel-list
+// scoping's "just what's on now" 1hr fetch. EPG_WINDOW_HOURS is rounded up
+// from lookback+forward (0.5h + 4h = 4.5h) because Kairos' /hours query param
+// is parsed with std::stoi (SchedulerService.cpp), which truncates a
+// fractional value rather than rounding it — 5 guarantees the fetch still
+// covers the full window that math implies.
+const val WINDOW_LOOKBACK_MIN = 30
+const val WINDOW_FORWARD_HOURS = 4
+private const val EPG_WINDOW_HOURS = 5
+
+// Kotlin counterpart of hades/src/guide/useGuideSession.ts. Same live-preview
+// session lifecycle guards (single in-flight start, debounced selection,
+// generation counter to discard a stale start once superseded) — the
 // document.visibilitychange handling doesn't have a direct Android
 // equivalent in this pass; onCleared() below covers navigating away, which
 // is this app's actual equivalent of "the tab closed."
+//
+// focusedProgram is independent of focusedChannelId/selectChannel's preview
+// session: it only ever drives the preview hero's TEXT (title/countdown).
+// The live video always follows the focused *channel* alone — you can't
+// actually preview a future program, only read about it — see
+// beginPreview()'s own doc and selectProgram() below.
 class GuideViewModel(private val apiClient: ApiClient) : ViewModel() {
+
+    // guide.zones per GET /api/tv/manifest: channel-header/time-grid/
+    // preview-panel — same structural-presence gating as
+    // hades/src/tv/TvGuideSection.tsx's useZoneManifest('guide').
+    var zones by mutableStateOf<List<TvZone>>(emptyList())
+        private set
+    fun hasZone(id: String) = zones.any { it.id == id }
 
     var channels by mutableStateOf<List<Channel>>(emptyList())
         private set
-    var currentProgramByChannel by mutableStateOf<Map<String, EpgProgram?>>(emptyMap())
+    // Every fetched program per channel across the full window, not just
+    // "what's on now" — the grid renders every block in this list, not a
+    // single current-program lookup.
+    var epgByChannel by mutableStateOf<Map<String, List<EpgProgram>>>(emptyMap())
         private set
     var loading by mutableStateOf(true)
         private set
     var errorMessage by mutableStateOf<String?>(null)
         private set
 
-    var selectedChannelId by mutableStateOf<String?>(null)
+    // Fixed at load time, same as useGuideSession.ts's windowStartMs ref —
+    // the grid's time axis doesn't slide as the clock ticks, only nowMs
+    // (the "now" marker's position within it) does.
+    val windowStartMs: Long = System.currentTimeMillis() - WINDOW_LOOKBACK_MIN * 60_000L
+    var nowMs by mutableStateOf(System.currentTimeMillis())
         private set
+
+    var focusedChannelId by mutableStateOf<String?>(null)
+        private set
+    var focusedProgram by mutableStateOf<EpgProgram?>(null)
+        private set
+
+    val focusedChannel: Channel? get() = channels.find { it.channelId == focusedChannelId }
+    val nowProgram: EpgProgram?
+        get() = focusedChannelId?.let { id ->
+            epgByChannel[id]?.find { it.wallClockStartMs <= nowMs && nowMs < it.wallClockEndMs }
+        }
+
     var previewManifestUrl by mutableStateOf<String?>(null)
         private set
     var previewLoading by mutableStateOf(false)
@@ -62,6 +101,16 @@ class GuideViewModel(private val apiClient: ApiClient) : ViewModel() {
 
     init {
         load()
+        tickClock()
+    }
+
+    private fun tickClock() {
+        viewModelScope.launch {
+            while (true) {
+                delay(CLOCK_TICK_MS)
+                nowMs = System.currentTimeMillis()
+            }
+        }
     }
 
     private fun load() {
@@ -69,19 +118,19 @@ class GuideViewModel(private val apiClient: ApiClient) : ViewModel() {
             loading = true
             errorMessage = null
             try {
+                val manifest = runCatching { apiClient.service.getTvManifest() }.getOrNull()
+                zones = manifest?.guide?.zones?.sortedBy { it.order } ?: emptyList()
+
                 val chs = apiClient.service.getChannels().sortedBy { it.number }
                 channels = chs
-                val fromSec = (System.currentTimeMillis() / 1000) - EPG_LOOKBACK_MIN * 60
-                val nowMs = System.currentTimeMillis()
-                val programs = coroutineScope {
+                val fromSec = windowStartMs / 1000
+                epgByChannel = coroutineScope {
                     chs.map { ch ->
                         async {
-                            val list = runCatching { apiClient.service.getChannelEpg(ch.channelId, EPG_WINDOW_HOURS, fromSec) }.getOrDefault(emptyList())
-                            ch.channelId to list.find { it.wallClockStartMs <= nowMs && nowMs < it.wallClockEndMs }
+                            ch.channelId to runCatching { apiClient.service.getChannelEpg(ch.channelId, EPG_WINDOW_HOURS, fromSec) }.getOrDefault(emptyList())
                         }
                     }.awaitAll()
-                }
-                currentProgramByChannel = programs.toMap()
+                }.toMap()
             } catch (e: Exception) {
                 errorMessage = "Couldn't load Guide: ${e.message ?: "unknown error"}"
             } finally {
@@ -90,13 +139,31 @@ class GuideViewModel(private val apiClient: ApiClient) : ViewModel() {
         }
     }
 
+    // Channel-header focus (or a plain channel switch) — "nothing specific,"
+    // fall back to that channel's own live program in the preview hero.
     // Debounced the same way useGuideSession's focus handler is (rapid
-    // D-pad traversal across many channel rows shouldn't spin up an encode
-    // session per row landed on) — selecting the same channel twice is a
+    // D-pad traversal across many channels shouldn't spin up an encode
+    // session per column landed on) — selecting the same channel twice is a
     // cheap no-op check, not re-debounced.
     fun selectChannel(channelId: String) {
-        if (selectedChannelId == channelId) return
-        selectedChannelId = channelId
+        focusedProgram = null
+        if (focusedChannelId == channelId) return
+        focusedChannelId = channelId
+        selectJob?.cancel()
+        selectJob = viewModelScope.launch {
+            delay(SELECT_DEBOUNCE_MS)
+            beginPreview(channelId)
+        }
+    }
+
+    // A specific program cell (now OR future) was focused — still switches
+    // the live preview to that channel (same debounce as selectChannel), but
+    // also pins the hero's text to this exact program rather than whatever's
+    // live right now.
+    fun selectProgram(channelId: String, program: EpgProgram) {
+        focusedProgram = program
+        if (focusedChannelId == channelId) return
+        focusedChannelId = channelId
         selectJob?.cancel()
         selectJob = viewModelScope.launch {
             delay(SELECT_DEBOUNCE_MS)

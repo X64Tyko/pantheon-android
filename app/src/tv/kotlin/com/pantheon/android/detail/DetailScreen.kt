@@ -2,6 +2,8 @@ package com.pantheon.android.detail
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +23,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +67,15 @@ private val BackdropScrimBrush = Brush.verticalGradient(
     1f to Color.Black.copy(alpha = 0.75f),
 )
 private val TitleTextShadow = Shadow(color = Color.Black, offset = Offset(0f, 2f), blurRadius = 8f)
+
+// Compose's own default focus-triggered bring-into-view scroll can race
+// scrollBelowHeader()'s intentional header-offset scroll below and
+// occasionally win, leaving a focused season/episode centered under the
+// sticky header instead of below it. Suppressing it makes
+// scrollBelowHeader() the only thing that ever scrolls this list.
+private object NoOpBringIntoViewSpec : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float) = 0f
+}
 
 // TV counterpart of the mobile flavor's DetailScreen.kt. No hero-spacer —
 // the header (and its backdrop) starts at y=0 immediately so Play is
@@ -123,6 +135,7 @@ fun DetailScreen(
             LaunchedEffect(Unit) { playFocusRequester.requestFocus() }
         }
 
+        CompositionLocalProvider(LocalBringIntoViewSpec provides NoOpBringIntoViewSpec) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             stickyHeader(key = "header") {
                 // The banner lives here, sized to at least cover the
@@ -166,9 +179,13 @@ fun DetailScreen(
 
                                 if (viewModel.hasZone("meta-block")) {
                                     Row(modifier = Modifier.padding(top = 6.dp)) {
-                                        viewModel.year?.let { Text("$it  ", color = Color.White) }
-                                        viewModel.rating?.let { Text("★ ${"%.1f".format(it)}  ", color = Color.White) }
-                                        Text(if (contentType == "show") "series" else "film", color = Color.White)
+                                        viewModel.metaFields.forEach { field ->
+                                            when (field) {
+                                                "year" -> viewModel.year?.let { Text("$it  ", color = Color.White) }
+                                                "rating" -> viewModel.rating?.let { Text("★ ${"%.1f".format(it)}  ", color = Color.White) }
+                                                "content_type" -> Text(if (contentType == "show") "series  " else "film  ", color = Color.White)
+                                            }
+                                        }
                                     }
                                 }
 
@@ -252,6 +269,7 @@ fun DetailScreen(
                     }
                 }
             }
+        }
         }
 
         // 40dp matches the safe-area margin used everywhere else on TV

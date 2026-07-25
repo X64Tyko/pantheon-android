@@ -40,7 +40,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -56,10 +55,7 @@ private val TextDim = Color(0xFFB5B5C4)
 private val TileBg = Color(0xFF232438)
 private val SlateGray = Color(0xFF4A4E5A)
 
-// Sticky header starts overlapping the fixed backdrop's bottom edge by
-// HERO_OVERLAP, then locks at the top once scrolled there.
 private val HERO_HEIGHT = 220.dp
-private val HERO_OVERLAP = 26.dp
 
 private val BackdropScrimBrush = Brush.verticalGradient(
     0f to Color.Transparent,
@@ -82,7 +78,6 @@ fun DetailScreen(
 ) {
     val viewModel: DetailViewModel = viewModel(factory = DetailViewModel.factory(apiClient, contentType, id))
     val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
     val listState = rememberLazyListState()
 
     var selectedEpisodeId by remember { mutableStateOf<String?>(null) }
@@ -103,14 +98,6 @@ fun DetailScreen(
             if (target != null) onPlay(target.kind, target.id, target.positionMs)
         }
     }
-
-    // Hero spacer — the sticky header's natural (unstuck) starting
-    // position, overlapping the fixed backdrop's bottom edge by
-    // HERO_OVERLAP. See the constants' own comment for why the backdrop
-    // itself no longer resizes.
-    val heroHeightPx = with(density) { HERO_HEIGHT.toPx() }
-    val heroOverlapPx = with(density) { HERO_OVERLAP.toPx() }
-    val heroSpacerPx = (heroHeightPx - heroOverlapPx).coerceAtLeast(0f)
 
     Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
         if (viewModel.loading) {
@@ -134,37 +121,15 @@ fun DetailScreen(
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
-            // Fixed peek behind the spacer before the header scrolls up to
-            // it — the header carries its own copy of this same image
-            // below, which takes over once stuck.
-            if (viewModel.hasZone("hero-backdrop")) {
-                Box(modifier = Modifier.fillMaxWidth().height(HERO_HEIGHT).align(Alignment.TopStart)) {
-                    val backdropUrl = if (selectedEpisode != null) {
-                        selectedEpisode.thumb?.let { apiClient.mediaUrl("/api/episodes/${selectedEpisode.episodeId}/thumb") }
-                    } else {
-                        viewModel.art?.let { apiClient.mediaUrl("/api/${if (contentType == "show") "shows" else "movies"}/$id/art") }
-                    }
-                    AsyncImage(
-                        model = backdropUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize().background(TileBg),
-                    )
-                    Box(modifier = Modifier.fillMaxSize().background(BackdropScrimBrush))
-                }
-            }
-
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                item(key = "hero-spacer") {
-                    Spacer(modifier = Modifier.height(with(density) { heroSpacerPx.toDp() }))
-                }
-
                 stickyHeader(key = "header") {
-                    // Banner lives here, sized to at least cover the
-                    // header's own content, so it's always in front of
-                    // whatever season/episode content scrolls underneath
-                    // once stuck — not a separate fixed layer behind the
-                    // list.
+                    // Banner lives here only — a single image layer, sized
+                    // to at least cover the header's own content, that
+                    // starts in normal flow and locks at the top once
+                    // scrolled there. No separate fixed layer behind the
+                    // list (see mobile counterpart's own history: that used
+                    // to double-render this same image as a "peek" behind
+                    // the header, mirrored here after TV's own fix).
                     Box(modifier = Modifier.fillMaxWidth().heightIn(min = HERO_HEIGHT)) {
                         if (viewModel.hasZone("hero-backdrop")) {
                             val backdropUrl = if (selectedEpisode != null) {
@@ -203,9 +168,13 @@ fun DetailScreen(
 
                                     if (viewModel.hasZone("meta-block")) {
                                         Row(modifier = Modifier.padding(top = 4.dp)) {
-                                            viewModel.year?.let { Text("$it  ", color = Color.White) }
-                                            viewModel.rating?.let { Text("★ ${"%.1f".format(it)}  ", color = Color.White) }
-                                            Text(if (contentType == "show") "series" else "film", color = Color.White)
+                                            viewModel.metaFields.forEach { field ->
+                                                when (field) {
+                                                    "year" -> viewModel.year?.let { Text("$it  ", color = Color.White) }
+                                                    "rating" -> viewModel.rating?.let { Text("★ ${"%.1f".format(it)}  ", color = Color.White) }
+                                                    "content_type" -> Text(if (contentType == "show") "series  " else "film  ", color = Color.White)
+                                                }
+                                            }
                                         }
                                     }
 
