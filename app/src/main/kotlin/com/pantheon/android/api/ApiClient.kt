@@ -7,6 +7,7 @@ import okhttp3.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 // Rebuildable per-server-URL Retrofit client — the URL isn't known at build
 // time (direct-connection mode, see project plan §7: a user-entered Hermes
@@ -94,6 +95,17 @@ class ApiClient(private val tokenStore: TokenStore) {
             }
         }
         val okHttp = OkHttpClient.Builder()
+            // Default 10s read/write is too short for POST /stream/vod/start:
+            // a direct-play session (VodSession::start() ->
+            // computeSegmentBoundaries()) runs ffprobe synchronously over the
+            // whole file to find real keyframe boundaries before it can
+            // respond, which for a movie-length file can legitimately take
+            // longer than 10s — Router.cpp's own comment on this endpoint
+            // acknowledges starts up to ~25s. Connect timeout stays short so
+            // an actually-unreachable server still fails fast.
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .addInterceptor(authInterceptor)
             .addInterceptor(errorReportingInterceptor)
             .build()
