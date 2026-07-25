@@ -42,6 +42,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -109,8 +110,21 @@ fun LibraryScreen(
     val searchOuterFocusRequester = remember { FocusRequester() }
     val searchFieldFocusRequester = remember { FocusRequester() }
     val searchHasFocus = searchEditing || searchButtonFocused
+    // requestFocus() alone only claims Compose/D-pad focus — it does not
+    // pop the on-screen keyboard, that needs an explicit show() on the
+    // software keyboard controller (a real, separate Android IME concept
+    // Compose focus doesn't imply). Without this the field was reachable
+    // and would accept D-pad Center/typed input from a connected hardware
+    // keyboard, but selecting it on a real TV remote (no hardware keyboard
+    // attached) opened nothing to type with.
+    val keyboardController = LocalSoftwareKeyboardController.current
     LaunchedEffect(searchEditing) {
-        if (searchEditing) searchFieldFocusRequester.requestFocus()
+        if (searchEditing) {
+            searchFieldFocusRequester.requestFocus()
+            keyboardController?.show()
+        } else {
+            keyboardController?.hide()
+        }
     }
     // Up from the search row falls through to Compose's default 2-D focus
     // search unless routed explicitly. The header's "← Back" button is
