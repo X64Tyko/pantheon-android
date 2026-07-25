@@ -78,7 +78,8 @@ fun PantheonNavHost(tokenStore: TokenStore, apiClient: ApiClient) {
             GuideScreen(
                 apiClient = apiClient,
                 onWatchChannel = { channelId -> navController.navigate(Routes.player("channel", channelId, 0)) },
-                onBack = { navController.popBackStack() },
+                onNavigateHome = { navController.popBackStack() },
+                onNavigateLibrary = { navController.navigate(Routes.LIBRARY) },
             )
         }
         composable(Routes.LIBRARY) {

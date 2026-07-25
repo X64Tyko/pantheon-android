@@ -18,11 +18,26 @@ import androidx.media3.ui.PlayerView
 // screens (same rationale as PlayerScreen.kt: PlayerView is flavor-agnostic,
 // no material3-vs-tv-material3 split needed for a raw video surface). One
 // ExoPlayer instance per GuideScreen mount, retargeted via setMediaItem()
-// as the manifestUrl changes rather than recreated — recreating on every
-// channel switch would reintroduce exactly the kind of janky rebuild this
-// whole manifest-driven project has otherwise avoided.
+// as the channel changes rather than recreated — recreating the whole
+// AndroidView/ExoPlayer instance on every channel switch would reintroduce
+// exactly the kind of janky rebuild this whole manifest-driven project has
+// otherwise avoided.
+//
+// reloadKey should be the focused channel's id — the same signal
+// ChannelHeaderCell's own focus highlight reacts to instantly. It's a
+// separate key from manifestUrl on purpose: PreviewSession.h's own comment
+// ("Manifest URL is stable for the session's whole life — switchChannel()
+// ... reused by every later switchChannel()") means manifestUrl stays the
+// exact same string across every channel switch after the first, so keying
+// this effect on manifestUrl alone means it only ever fires once — ExoPlayer
+// never gets told to reload after that, and is left to notice on its own
+// that the server deleted and recreated the segments underneath it (fragile:
+// a live HLS media-sequence reset like that isn't something players reliably
+// self-recover from). Keying on the channel id too forces a real reload
+// every time the focused channel actually changes, even though the URL
+// itself never does.
 @Composable
-fun PreviewPlayerView(manifestUrl: String?, modifier: Modifier = Modifier) {
+fun PreviewPlayerView(manifestUrl: String?, reloadKey: Any? = manifestUrl, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -33,7 +48,7 @@ fun PreviewPlayerView(manifestUrl: String?, modifier: Modifier = Modifier) {
     DisposableEffect(Unit) {
         onDispose { exoPlayer.release() }
     }
-    LaunchedEffect(manifestUrl) {
+    LaunchedEffect(manifestUrl, reloadKey) {
         if (manifestUrl == null) { exoPlayer.stop(); return@LaunchedEffect }
         exoPlayer.setMediaItem(MediaItem.fromUri(manifestUrl))
         exoPlayer.prepare()

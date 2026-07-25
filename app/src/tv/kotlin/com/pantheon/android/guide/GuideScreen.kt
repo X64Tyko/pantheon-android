@@ -87,16 +87,26 @@ private const val THIRTY_MIN_MS = 30 * 60_000L
 fun GuideScreen(
     apiClient: ApiClient,
     onWatchChannel: (channelId: String) -> Unit,
-    onBack: () -> Unit,
+    onNavigateHome: () -> Unit,
+    onNavigateLibrary: () -> Unit,
 ) {
     val viewModel: GuideViewModel = viewModel(factory = GuideViewModel.factory(apiClient))
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
         Column(modifier = Modifier.fillMaxSize()) {
+            // Same quick-action row style as Home's own (Library/Guide),
+            // just the reverse pairing — Guide is only ever reached from
+            // Home today, so this is both the D-pad affordance and this
+            // screen's own hardware-Back target. Sits above the preview
+            // (not between it and the grid) so it reads as this screen's
+            // header, the same position Home's own quick-action row has.
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 12.dp)) {
+                FocusableTextButton(text = "🏠 Home", onClick = onNavigateHome)
+                FocusableTextButton(text = "Library", onClick = onNavigateLibrary, modifier = Modifier.padding(start = 12.dp))
+            }
+
             if (viewModel.hasZone("preview-panel")) {
-                GuidePreviewPanel(viewModel, onBack, onWatch = onWatchChannel)
-            } else {
-                TvTextButton(text = "← Back", onClick = onBack, modifier = Modifier.padding(40.dp))
+                GuidePreviewPanel(viewModel, onWatch = onWatchChannel)
             }
 
             if (viewModel.loading) {
@@ -111,14 +121,28 @@ fun GuideScreen(
 }
 
 @Composable
-private fun GuidePreviewPanel(viewModel: GuideViewModel, onBack: () -> Unit, onWatch: (String) -> Unit) {
-    Box(modifier = Modifier.fillMaxWidth().height(340.dp)) {
-        PreviewPlayerView(manifestUrl = viewModel.previewManifestUrl, modifier = Modifier.fillMaxSize())
+private fun GuidePreviewPanel(viewModel: GuideViewModel, onWatch: (String) -> Unit) {
+    // Default D-pad initial-focus landing isn't guaranteed to land inside
+    // the channel grid now that the Home/Library quick-action row sits
+    // above this panel — select the first channel explicitly so the preview
+    // always has real data from the moment Guide loads, the same safety net
+    // the mobile flavor's own GuidePreviewCard already has (touch has no
+    // default-focus landing at all to rely on either way).
+    LaunchedEffect(viewModel.channels) {
+        if (viewModel.focusedChannelId == null) viewModel.channels.firstOrNull()?.let { viewModel.selectChannel(it.channelId) }
+    }
+
+    // 260dp — smaller than the 340dp this started at (that left the grid
+    // room for barely an hour of programs at once on a real TV), but taller
+    // than the 200dp this shrank to first (too cramped once the Home/
+    // Library row moved back above it and full detail text came back).
+    Box(modifier = Modifier.fillMaxWidth().height(260.dp)) {
+        PreviewPlayerView(
+            manifestUrl = viewModel.previewManifestUrl,
+            reloadKey = viewModel.focusedChannelId,
+            modifier = Modifier.fillMaxSize(),
+        )
         Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.75f))))
-        // 40dp matches the safe-area margin used everywhere else on TV —
-        // 24dp here was an outlier tight enough to risk sitting in overscan
-        // territory on some TVs.
-        TvTextButton(text = "← Back", onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(40.dp))
 
         val channel = viewModel.focusedChannel
         // The preview hero's TEXT follows whatever program is focused (now
@@ -126,7 +150,7 @@ private fun GuidePreviewPanel(viewModel: GuideViewModel, onBack: () -> Unit, onW
         // alone regardless — see GuideViewModel's own comment on why.
         val program = viewModel.focusedProgram ?: viewModel.nowProgram
         if (channel != null) {
-            Column(modifier = Modifier.align(Alignment.BottomStart).padding(40.dp).widthIn(max = 640.dp)) {
+            Column(modifier = Modifier.align(Alignment.BottomStart).padding(28.dp).widthIn(max = 640.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Ch ${channel.number} · ${channel.name}", color = TextDim, style = MaterialTheme.typography.labelLarge)
                     channel.contentTag?.takeIf { it.isNotBlank() }?.let { tag ->
@@ -152,9 +176,9 @@ private fun GuidePreviewPanel(viewModel: GuideViewModel, onBack: () -> Unit, onW
                     }
                 }
                 program?.overview?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, color = TextDim, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+                    Text(it, color = TextDim, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
                 }
-                TvTextButton(text = "▶  Watch", onClick = { onWatch(channel.channelId) }, modifier = Modifier.padding(top = 12.dp))
+                TvTextButton(text = "▶  Watch", onClick = { onWatch(channel.channelId) }, modifier = Modifier.padding(top = 10.dp))
             }
         }
     }
@@ -354,5 +378,20 @@ private fun NowPulseLine(topOffset: Dp) {
 private fun TvTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(onClick = onClick, modifier = modifier, colors = ClickableSurfaceDefaults.colors(containerColor = Color.Black.copy(alpha = 0.4f))) {
         Text(text, color = Color.White, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+    }
+}
+
+// Same transparent-pill style as HomeScreen.kt's own FocusableTextButton —
+// duplicated rather than shared, same as this file's own BgColor/GoldColor/
+// etc. constants (no shared TV UI layer between screens, only the shared
+// ViewModel/DTOs).
+@Composable
+private fun FocusableTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent),
+    ) {
+        Text(text, color = Color.White, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
     }
 }

@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -84,15 +85,22 @@ private const val THIRTY_MIN_MS = 30 * 60_000L
 fun GuideScreen(
     apiClient: ApiClient,
     onWatchChannel: (channelId: String) -> Unit,
-    onBack: () -> Unit,
+    onNavigateHome: () -> Unit,
+    onNavigateLibrary: () -> Unit,
 ) {
     val viewModel: GuideViewModel = viewModel(factory = GuideViewModel.factory(apiClient))
 
     Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
         Column(modifier = Modifier.fillMaxSize()) {
-            Row(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
-                TextButton(onClick = onBack) { Text("← Back", color = Color.White) }
-                Text("Guide", style = MaterialTheme.typography.headlineSmall, color = Color.White, modifier = Modifier.padding(start = 8.dp))
+            // Same quick-action row style as Home's own (Library/Guide) —
+            // Guide is only ever reached from Home today, so this doubles as
+            // this screen's own way back.
+            Row(
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedButton(onClick = onNavigateHome) { Text("🏠 Home") }
+                OutlinedButton(onClick = onNavigateLibrary) { Text("Library") }
             }
 
             if (viewModel.hasZone("preview-panel")) {
@@ -121,7 +129,11 @@ private fun GuidePreviewCard(viewModel: GuideViewModel, onWatch: (String) -> Uni
     }
 
     Box(modifier = Modifier.fillMaxWidth().height(220.dp).padding(horizontal = 16.dp, vertical = 8.dp).clip(RoundedCornerShape(12.dp))) {
-        PreviewPlayerView(manifestUrl = viewModel.previewManifestUrl, modifier = Modifier.fillMaxSize())
+        PreviewPlayerView(
+            manifestUrl = viewModel.previewManifestUrl,
+            reloadKey = viewModel.focusedChannelId,
+            modifier = Modifier.fillMaxSize(),
+        )
         Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.8f))))
 
         val channel = viewModel.focusedChannel
