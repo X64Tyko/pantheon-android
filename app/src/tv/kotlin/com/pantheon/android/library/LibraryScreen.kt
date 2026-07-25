@@ -66,24 +66,15 @@ val BgColor = Color(0xFF1B1C29)
 val GoldColor = Color(0xFFE0B84E)
 val TextDim = Color(0xFFB5B5C4)
 private val TileBg = Color(0xFF232438)
-// hds-violet's own baked-in value, only used if the manifest has no theme
-// yet (fresh checkout before the token generator has ever run) — the real
-// value normally comes from LibraryViewModel.themeColor("hds-violet", ...).
+// Fallback only — real value comes from LibraryViewModel.themeColor("hds-violet", ...).
 private val VioletFallback = Color(0xFF9991EB)
 
-// TV counterpart of the mobile flavor's LibraryScreen.kt — same
-// LibraryViewModel, D-pad-focusable androidx.tv.material3 Surfaces instead
-// of clickable Compose modifiers. Search uses a plain compose.material3
-// OutlinedTextField (not tv-material, which has no text field) — already the
-// established pattern for this app's Connect/Login screens, themed
-// correctly because PantheonTheme.kt wraps both MaterialTheme trees.
-//
-// Filters button opens TvFilterPanel — the same FilterTreeState/FIELD_DEFS
-// rule builder as mobile's FilterPanel, but built from inline chip rows
-// instead of DropdownMenu popups: nested popup focus scopes are a known
-// D-pad trap (see the search field's own onPreviewKeyEvent workaround
-// below), so field/operator selection is just another row of TvChips in
-// the normal focus-traversal order.
+// TV counterpart of mobile's LibraryScreen.kt: same LibraryViewModel,
+// D-pad-focusable tv.material3 Surfaces instead of clickable modifiers.
+// Search uses a plain compose.material3 OutlinedTextField (tv-material has
+// none) — same pattern as Connect/Login. Filters opens TvFilterPanel, built
+// from inline TvChip rows rather than DropdownMenu popups, which are a
+// known D-pad focus trap.
 @Composable
 fun LibraryScreen(
     apiClient: ApiClient,
@@ -95,30 +86,27 @@ fun LibraryScreen(
     val focusManager = LocalFocusManager.current
     var filtersOpen by remember { mutableStateOf(false) }
 
-    // Hoisted out of the search-bar zone block below (rather than local to
-    // it) so the BackHandler beneath it can reach them too.
+    // Hoisted so BackHandler below can also reach these.
     var searchEditing by remember { mutableStateOf(false) }
     var searchButtonFocused by remember { mutableStateOf(false) }
-    // Two requesters, not one — the outer Surface (searchOuterFocusRequester)
-    // stays mounted across the whole editing/not-editing lifetime; only its
-    // CONTENT (Text vs. OutlinedTextField) swaps. Previously a single
-    // FocusRequester was attached to two different composables that got
-    // fully disposed/recreated on that same swap, leaving a frame where
-    // nothing was actually focused — Compose's default focus search filled
-    // that gap by landing on the header's "← Back" button (nearest/
-    // first-composed candidate), which is why selecting search silently
-    // kicked focus away and made it impossible to type. Keeping the outer
-    // node alive means D-pad traversal always has a stable target here;
-    // only the deliberate editing<->not-editing handoff (via the
-    // LaunchedEffect below) ever moves focus onto/off of the inner field.
+    // Outer Surface stays mounted across editing/not-editing; only its
+    // content (Text vs. OutlinedTextField) swaps. A single shared
+    // FocusRequester used to leave a frame with nothing focused during that
+    // swap, and Compose's default focus search filled the gap by landing on
+    // "← Back" instead — selecting search silently lost focus.
     val searchOuterFocusRequester = remember { FocusRequester() }
     val searchFieldFocusRequester = remember { FocusRequester() }
+    // The field's onFocusChanged fires once, synchronously, on attach with
+    // isFocused=false — before the LaunchedEffect's requestFocus() below has
+    // run. Unguarded, that false collapsed searchEditing right back (the
+    // "flash, then no keyboard" bug). Reset on entry happens in the Surface's
+    // onClick, not the LaunchedEffect: the LaunchedEffect runs after the
+    // field has already attached and fired its own false, so on repeat
+    // entries it would still read the previous session's stale `true`.
+    var searchFieldEverFocused by remember { mutableStateOf(false) }
     val searchHasFocus = searchEditing || searchButtonFocused
-    // show(Type.ime()) only works once the target view genuinely already has
-    // platform focus — calling it right after requestFocus() in the same
-    // coroutine races that (requestFocus() only schedules the move). Moved
-    // to the field's own onFocusChanged below, which fires once focus has
-    // actually landed.
+    // requestFocus() only schedules the move; show(ime) needs focus to have
+    // actually landed, so it lives in the field's own onFocusChanged instead.
     val view = LocalView.current
     LaunchedEffect(searchEditing) {
         if (searchEditing) {
@@ -128,41 +116,24 @@ fun LibraryScreen(
             WindowCompat.getInsetsController(window, view).hide(WindowInsetsCompat.Type.ime())
         }
     }
-    // Up from the search row falls through to Compose's default 2-D focus
-    // search unless routed explicitly. The header's "← Back" button is
-    // nearly always the only (or geometrically nearest/first-composed)
-    // candidate above the full-width search row, so unmodified Up-navigation
-    // out of search deterministically lands there instead of on Filters —
-    // "snaps to the back button" — even though Back navigates clean off the
-    // whole screen. Routed to this instead in both the editing and
-    // not-yet-editing key handlers below; falls back to just consuming the
-    // key (staying put) when Filters isn't rendered at all (see its own
-    // conditional).
+    // Unrouted Up-navigation out of search lands on "← Back" (nearest
+    // candidate), not Filters. Routed explicitly to filtersFocusRequester
+    // below in both editing and not-editing key handlers.
     val filtersFocusRequester = remember { FocusRequester() }
     val filtersAvailable = viewModel.filterFields.isNotEmpty() || viewModel.libraries.isNotEmpty() || viewModel.sortOptions.isNotEmpty()
 
-    // Claims initial D-pad focus for the search bar once its zone is known
-    // to exist — LibraryScreen previously made no such claim at all (unlike
-    // Detail/TvFilterPanel, which both do this for their own primary
-    // control on entry), leaving Compose's default focus search to pick
-    // whatever it considered nearest on first composition too.
+    // Claims initial D-pad focus once the search zone exists, matching
+    // Detail/TvFilterPanel's own on-entry claims.
     val searchZoneAvailable = viewModel.hasZone("search-bar")
     LaunchedEffect(searchZoneAvailable) {
         if (searchZoneAvailable) searchOuterFocusRequester.requestFocus()
     }
 
-    // First Back press while browsing anywhere else on this screen (a grid
-    // tile, the Filters button, ...) snaps D-pad focus to the search bar
-    // instead of immediately leaving Library — real feedback: "Pressing the
-    // back button while browsing the library should snap to the search bar
-    // before going back through menus." Only once focus is already on the
-    // search bar does a further Back fall through to actual navigation
-    // (this handler disables itself, letting the NavHost's own back
-    // handling take over). Doesn't fight the search field's own Back
-    // handling while actively editing (Key.Back there collapses edit mode
-    // via onPreviewKeyEvent, consumed before it ever reaches this
-    // dispatcher-level handler) or TvFilterPanel's Back-to-close (its
-    // Dialog owns a separate window/back-dispatcher scope entirely).
+    // First Back press elsewhere on this screen snaps focus to search
+    // instead of leaving Library; only Back while already on search falls
+    // through to real navigation. Doesn't fight the field's own Back
+    // handling (collapses edit mode via onPreviewKeyEvent first) or
+    // TvFilterPanel's Back-to-close (separate Dialog back-dispatcher scope).
     BackHandler(enabled = viewModel.hasZone("search-bar") && !searchHasFocus) {
         searchOuterFocusRequester.requestFocus()
     }
@@ -228,7 +199,7 @@ fun LibraryScreen(
                 // Surface is what stays mounted/focusable the whole time;
                 // only its content below swaps between the two states.
                 Surface(
-                    onClick = { searchEditing = true },
+                    onClick = { searchFieldEverFocused = false; searchEditing = true },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp)
                         .focusRequester(searchOuterFocusRequester)
                         .onFocusChanged { searchButtonFocused = it.isFocused }
@@ -262,6 +233,7 @@ fun LibraryScreen(
                                 .focusRequester(searchFieldFocusRequester)
                                 .onFocusChanged { focusState ->
                                     if (focusState.isFocused) {
+                                        searchFieldEverFocused = true
                                         // Real platform focus has now actually landed here (not
                                         // just been requested) — the only point show() is
                                         // guaranteed not to race the window's own focus state.
@@ -269,7 +241,11 @@ fun LibraryScreen(
                                             WindowCompat.getInsetsController(window, view)
                                                 .show(WindowInsetsCompat.Type.ime())
                                         }
-                                    } else {
+                                    } else if (searchFieldEverFocused) {
+                                        // Ignore the spurious isFocused=false this callback
+                                        // fires on attach, before the field has ever really
+                                        // held focus — see searchFieldEverFocused's own comment
+                                        // above. Only a genuine loss of focus collapses back.
                                         searchEditing = false
                                     }
                                 }
