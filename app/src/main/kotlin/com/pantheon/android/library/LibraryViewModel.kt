@@ -107,8 +107,31 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
     val filterTree = FilterTreeState()
 
     private var page = 0
+    // Debounce timer for search input only — never itself holds a network
+    // call, just delay() then hands off to listJob below.
     private var searchJob: Job? = null
+    // The one in-flight fetch()/loadMore() call, shared by every mutator
+    // (search, sort, sortDir, library toggle, filter apply, reroll, load
+    // more). Every one of them cancels whatever's currently running here
+    // before starting its own — without that, e.g. toggling a library while
+    // a search's debounced fetch is still in flight raced two concurrent
+    // fetch() calls against the same shows/movies/total state, and whichever
+    // response happened to land last won regardless of which one was
+    // actually newer/correct for the current filters. Routing loadMore()
+    // through the same job means a fresh filter/sort/search change also
+    // cancels a load-more in flight, instead of letting its (now
+    // stale-filter) page land on top of a freshly-filtered list.
+    private var listJob: Job? = null
     private val filterValuesCache = mutableMapOf<String, List<String>>()
+
+    // Cancels whatever fetch()/loadMore() is currently running and starts a
+    // fresh page-0 fetch — the shared entry point every mutator below (and
+    // the search debounce once it fires) goes through.
+    private fun refetch() {
+        page = 0
+        listJob?.cancel()
+        listJob = viewModelScope.launch { fetch() }
+    }
 
     init {
         viewModelScope.launch {
@@ -118,7 +141,7 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
             val libs = runCatching { apiClient.service.getLibraries() }.getOrDefault(emptyList())
             libraries = libs
             selectedLibraryIds = libs.map { it.libraryId }.toSet()
-            fetch()
+            listJob = launch { fetch() }
         }
     }
 
@@ -144,8 +167,7 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             delay(SEARCH_DEBOUNCE_MS)
-            page = 0
-            fetch()
+            refetch()
         }
     }
 
@@ -155,33 +177,29 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
     // own comment above already calls out).
     fun onSortChange(s: String) {
         sort = s
-        page = 0
-        viewModelScope.launch { fetch() }
+        refetch()
     }
 
     fun onSortDirChange(d: String) {
         sortDir = d
-        page = 0
-        viewModelScope.launch { fetch() }
+        refetch()
     }
 
     fun rerollRandom() {
         randomSeed = Random.nextInt(Int.MAX_VALUE)
-        if (sort == "random") { page = 0; viewModelScope.launch { fetch() } }
+        if (sort == "random") refetch()
     }
 
     fun toggleLibrary(libraryId: String) {
         val next = selectedLibraryIds.toMutableSet()
         if (!next.remove(libraryId)) next.add(libraryId)
         selectedLibraryIds = next
-        page = 0
-        viewModelScope.launch { fetch() }
+        refetch()
     }
 
     fun selectAllLibraries() {
         selectedLibraryIds = libraries.map { it.libraryId }.toSet()
-        page = 0
-        viewModelScope.launch { fetch() }
+        refetch()
     }
 
     // Called when the filter panel is closed/applied — the panel edits
@@ -189,8 +207,7 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
     // the actual refetch once the user is done, rather than re-fetching on
     // every keystroke inside the panel.
     fun applyFilters() {
-        page = 0
-        viewModelScope.launch { fetch() }
+        refetch()
     }
 
     // True once libraries have loaded and every one has been explicitly
@@ -248,7 +265,12 @@ class LibraryViewModel(private val apiClient: ApiClient) : ViewModel() {
     fun loadMore() {
         if (loading || loadingMore || noLibrariesSelected) return
         if (shows.size + movies.size >= total) return
-        viewModelScope.launch {
+        // Shares listJob with fetch() — a filter/sort/search change that
+        // lands while a load-more page is still in flight must cancel it,
+        // otherwise that (now stale-filter) page can land after the fresh
+        // fetch and get appended onto a list it no longer matches.
+        listJob?.cancel()
+        listJob = viewModelScope.launch {
             loadingMore = true
             val nextPage = page + 1
             try {
