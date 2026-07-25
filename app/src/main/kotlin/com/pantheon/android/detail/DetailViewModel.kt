@@ -90,13 +90,29 @@ class DetailViewModel(private val apiClient: ApiClient, private val contentType:
         }
     }
 
-    // Movies play directly; shows resolve through the server-side
+    // Both movies and shows resolve through their own server-side
     // resolve-play-target branch (resume in-progress / next episode /
     // episode 1) — no client ever ports that algorithm, see
-    // hades/src/player/resolvePlayTarget.ts's own comment.
+    // hades/src/player/resolvePlayTarget.ts's own comment. Falls back to
+    // positionMs=0 on the same id if the lookup itself fails, rather than
+    // failing the whole Play action over a watch-progress hiccup.
     suspend fun resolvePlayTarget(): ResolvedPlayTarget? {
-        if (contentType == "movie") return ResolvedPlayTarget(kind = "movie", id = id, positionMs = 0)
+        if (contentType == "movie") {
+            return runCatching { apiClient.service.getResolvedMoviePlayTarget(id) }
+                .getOrNull() ?: ResolvedPlayTarget(kind = "movie", id = id, positionMs = 0)
+        }
         return runCatching { apiClient.service.getResolvedPlayTarget(id) }.getOrNull()
+    }
+
+    // "Play from Beginning" — ignores watch progress entirely. For a movie,
+    // just this movie at position 0; for a show, episode 1 rather than
+    // whatever episode resolvePlayTarget() would resume into, since
+    // restarting a show means starting over from the top, not re-resuming
+    // the in-progress episode at its own beginning.
+    fun playFromBeginningTarget(): ResolvedPlayTarget? {
+        if (contentType == "movie") return ResolvedPlayTarget(kind = "movie", id = id, positionMs = 0)
+        val first = seasons.firstOrNull()?.episodes?.firstOrNull() ?: return null
+        return ResolvedPlayTarget(kind = "episode", id = first.episodeId, positionMs = 0)
     }
 
     companion object {

@@ -99,6 +99,10 @@ fun DetailScreen(
         }
     }
 
+    fun goPlayFromBeginning() {
+        viewModel.playFromBeginningTarget()?.let { onPlay(it.kind, it.id, it.positionMs) }
+    }
+
     Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
         if (viewModel.loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = GoldColor) }
@@ -179,7 +183,13 @@ fun DetailScreen(
                                     }
 
                                     if (viewModel.hasZone("play-button")) {
-                                        androidx.compose.material3.Button(onClick = ::goPlay, modifier = Modifier.padding(top = 10.dp)) { Text("▶  Play") }
+                                        Row(modifier = Modifier.padding(top = 10.dp)) {
+                                            androidx.compose.material3.Button(onClick = ::goPlay) { Text("▶  Play") }
+                                            androidx.compose.material3.OutlinedButton(
+                                                onClick = ::goPlayFromBeginning,
+                                                modifier = Modifier.padding(start = 10.dp),
+                                            ) { Text("Play from Beginning") }
+                                        }
                                     }
                                 }
                             }

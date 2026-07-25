@@ -122,11 +122,16 @@ fun PlayerScreen(
             // without an explicit start position it defaults an unprepared
             // dynamic window to the live edge, so playback jumped straight to
             // wherever the transcode had currently raced ahead to instead of
-            // the actual beginning. Mirrors VideoPlayer.tsx's
-            // `isLive ? {} : { startPosition: 0 }` for hls.js — this
-            // manifest's own timeline always starts at 0 regardless of the
-            // requested resume point (see basePositionMs's comment).
-            exoPlayer.setMediaItem(itemBuilder.build(), 0L)
+            // the actual beginning.
+            //
+            // The manifest's timeline is the whole source file on its real,
+            // absolute timeline (VodSession::buildStaticPlaylist emits every
+            // segment from file-start to file-end immediately) — position_ms
+            // only tells Hephaestus which segment to encode *first* for a
+            // fast first byte, it doesn't trim or renumber the playlist. So
+            // resuming requires an explicit seek to basePositionMs here, same
+            // as VideoPlayer.tsx's `startPosition: startPositionSec ?? 0`.
+            exoPlayer.setMediaItem(itemBuilder.build(), viewModel.basePositionMs)
         }
         exoPlayer.prepare()
     }

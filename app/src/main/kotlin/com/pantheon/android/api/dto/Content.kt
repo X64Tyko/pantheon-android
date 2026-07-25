@@ -48,6 +48,19 @@ data class WatchProgress(
     @SerializedName("up_next") val upNext: Boolean = false,
 )
 
+// GET /api/shows/:id/watch-state — the most-recently-touched episode for a
+// show, completed or not (unlike /api/watch-progress, which drops completed
+// rows with no next episode). Used to check whether a specific episode (e.g.
+// a "latest episode" shelf action) already has progress worth resuming,
+// rather than the show's general resume target.
+data class ShowWatchState(
+    @SerializedName("content_id") val contentId: String,
+    @SerializedName("position_ms") val positionMs: Long,
+    @SerializedName("duration_ms") val durationMs: Long,
+    val completed: Boolean,
+    @SerializedName("updated_at") val updatedAt: Long,
+)
+
 data class PagedResult<T>(
     val items: List<T>,
     val total: Int,

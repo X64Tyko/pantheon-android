@@ -21,6 +21,7 @@ import com.pantheon.android.api.dto.PreviewSwitchRequest
 import com.pantheon.android.api.dto.ResolvedPlayTarget
 import com.pantheon.android.api.dto.Show
 import com.pantheon.android.api.dto.ShowDetail
+import com.pantheon.android.api.dto.ShowWatchState
 import com.pantheon.android.api.dto.TvManifest
 import com.pantheon.android.api.dto.VodStartRequest
 import com.pantheon.android.api.dto.VodStartResponse
@@ -74,6 +75,12 @@ interface KairosApi {
 
     @GET("api/shows/{id}/resolve-play-target")
     suspend fun getResolvedPlayTarget(@Path("id") showId: String): ResolvedPlayTarget?
+
+    @GET("api/movies/{id}/resolve-play-target")
+    suspend fun getResolvedMoviePlayTarget(@Path("id") movieId: String): ResolvedPlayTarget?
+
+    @GET("api/shows/{id}/watch-state")
+    suspend fun getShowWatchState(@Path("id") showId: String): ShowWatchState?
 
     @GET("api/libraries")
     suspend fun getLibraries(): List<LibraryWithSource>

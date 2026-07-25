@@ -110,6 +110,10 @@ fun DetailScreen(
         }
     }
 
+    fun goPlayFromBeginning() {
+        viewModel.playFromBeginningTarget()?.let { onPlay(it.kind, it.id, it.positionMs) }
+    }
+
     fun scrollBelowHeader(seasonIndex: Int) {
         scope.launch { listState.animateScrollToItem(seasonIndex + 1, scrollOffset = -headerHeightPx) }
     }
@@ -190,10 +194,17 @@ fun DetailScreen(
                                 }
 
                                 if (viewModel.hasZone("play-button")) {
-                                    Button(
-                                        onClick = ::goPlay,
-                                        modifier = Modifier.padding(top = 14.dp).focusRequester(playFocusRequester),
-                                    ) { Text("▶  Play") }
+                                    Row(modifier = Modifier.padding(top = 14.dp)) {
+                                        Button(
+                                            onClick = ::goPlay,
+                                            modifier = Modifier.focusRequester(playFocusRequester),
+                                        ) { Text("▶  Play") }
+                                        TvTextButton(
+                                            text = "Play from Beginning",
+                                            onClick = ::goPlayFromBeginning,
+                                            modifier = Modifier.padding(start = 12.dp),
+                                        )
+                                    }
                                 }
 
                                 if (viewModel.overview.isNotEmpty()) {

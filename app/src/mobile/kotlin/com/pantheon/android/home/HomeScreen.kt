@@ -67,10 +67,17 @@ fun HomeScreen(
     val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(apiClient))
     val scope = rememberCoroutineScope()
 
+    // "Play" from any shelf resumes real progress, not just the dedicated
+    // Continue Watching row — every content_type now has a server-side
+    // resolve-play-target lookup (movies included, see kairos's
+    // PlaybackService.cpp) so no call site needs to special-case position 0.
     fun resolveAndPlay(contentType: String, id: String) {
-        if (contentType == "movie") { onPlay("movie", id, 0); return }
         scope.launch {
-            val target = runCatching { apiClient.service.getResolvedPlayTarget(id) }.getOrNull()
+            val target = if (contentType == "movie") {
+                runCatching { apiClient.service.getResolvedMoviePlayTarget(id) }.getOrNull()
+            } else {
+                runCatching { apiClient.service.getResolvedPlayTarget(id) }.getOrNull()
+            }
             if (target != null) onPlay(target.kind, target.id, target.positionMs)
         }
     }
@@ -84,7 +91,18 @@ fun HomeScreen(
     fun shelfItemPlay(row: TvHomeRow, item: HomeMediaItem) {
         if (row.itemAction == TvItemAction.PLAY_LATEST_EPISODE) {
             val latest = (item as? HomeMediaItem.ShowItem)?.show?.latestEpisode
-            if (latest != null) { onPlay("episode", latest.episodeId, 0); return }
+            if (latest != null) {
+                // The show's resume target might not be this specific latest
+                // episode (viewer could be behind on an earlier one) — only
+                // resume if the show's own watch-state is actually sitting on
+                // this episode already; otherwise it's unwatched, start at 0.
+                scope.launch {
+                    val state = runCatching { apiClient.service.getShowWatchState(item.id) }.getOrNull()
+                    val positionMs = if (state?.contentId == latest.episodeId && !state.completed) state.positionMs else 0L
+                    onPlay("episode", latest.episodeId, positionMs)
+                }
+                return
+            }
         }
         resolveAndPlay(item.contentType, item.id)
     }
