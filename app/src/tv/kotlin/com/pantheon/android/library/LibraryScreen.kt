@@ -1,8 +1,11 @@
 package com.pantheon.android.library
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,11 +45,12 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
@@ -111,20 +115,27 @@ fun LibraryScreen(
     val searchFieldFocusRequester = remember { FocusRequester() }
     val searchHasFocus = searchEditing || searchButtonFocused
     // requestFocus() alone only claims Compose/D-pad focus — it does not
-    // pop the on-screen keyboard, that needs an explicit show() on the
-    // software keyboard controller (a real, separate Android IME concept
-    // Compose focus doesn't imply). Without this the field was reachable
-    // and would accept D-pad Center/typed input from a connected hardware
-    // keyboard, but selecting it on a real TV remote (no hardware keyboard
-    // attached) opened nothing to type with.
-    val keyboardController = LocalSoftwareKeyboardController.current
+    // pop the on-screen keyboard, that needs an explicit ask (a real,
+    // separate Android IME concept Compose focus doesn't imply). Without
+    // this the field was reachable and would accept D-pad Center/typed
+    // input from a connected hardware keyboard, but selecting it on a real
+    // TV remote (no hardware keyboard attached) opened nothing to type
+    // with. Deliberately WindowInsetsControllerCompat, not
+    // LocalSoftwareKeyboardController.current?.show() (tried first,
+    // real-hardware report: still didn't reliably open) — the Compose
+    // controller's show() request can race the window not yet having
+    // input focus and silently no-op, a documented androidx.tv limitation
+    // ("Focusing on a TextField does not always open the keyboard").
+    // WindowCompat.getInsetsController(...).show(Type.ime()) is the
+    // platform-level, API-30+ recommended replacement, guaranteed to be
+    // scheduled once the window actually has focus rather than firing
+    // once and giving up.
+    val view = LocalView.current
     LaunchedEffect(searchEditing) {
-        if (searchEditing) {
-            searchFieldFocusRequester.requestFocus()
-            keyboardController?.show()
-        } else {
-            keyboardController?.hide()
-        }
+        if (searchEditing) searchFieldFocusRequester.requestFocus()
+        val window = view.context.findActivity()?.window ?: return@LaunchedEffect
+        val insetsController = WindowCompat.getInsetsController(window, view)
+        if (searchEditing) insetsController.show(WindowInsetsCompat.Type.ime()) else insetsController.hide(WindowInsetsCompat.Type.ime())
     }
     // Up from the search row falls through to Compose's default 2-D focus
     // search unless routed explicitly. The header's "← Back" button is
@@ -365,17 +376,23 @@ private fun LibraryTile(apiClient: ApiClient, item: HomeMediaItem, onClick: () -
         // the inner Surface's own scale) contains that zoom to the tile's
         // own frame: the poster still visibly scales/crops on focus, it just
         // can't bleed into the caption or the next grid row anymore.
-        Box(modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp))) {
+        //
+        // The focus border lives here too, not on the inner Surface — a
+        // border requested via Surface's own `border` param scales outward
+        // together with that same focusedScale zoom (it's part of the
+        // Surface's own decoration), which meant it grew straight into this
+        // Box's clip region right as it should've become most visible,
+        // leaving only a barely-there sliver behind. Drawn on this outer,
+        // unscaled Box instead, it stays a crisp, fully visible ring at the
+        // tile's true frame regardless of how much the content inside zooms.
+        Box(
+            modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp))
+                .border(2.dp, if (focused) focusBorderColor else Color.Transparent, RoundedCornerShape(8.dp)),
+        ) {
             Surface(
                 onClick = onClick,
                 modifier = Modifier.fillMaxSize().onFocusChanged { focused = it.isFocused },
                 colors = ClickableSurfaceDefaults.colors(containerColor = TileBg),
-                // ClickableSurfaceDefaults.border() defaults focusedBorder to
-                // Border.None — a focus ring here isn't a platform default,
-                // it has to be requested explicitly.
-                border = ClickableSurfaceDefaults.border(
-                    focusedBorder = Border(BorderStroke(2.dp, focusBorderColor), inset = 0.dp, shape = RoundedCornerShape(8.dp)),
-                ),
             ) {
                 AsyncImage(model = item.thumbUrl(apiClient), contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             }
@@ -389,4 +406,16 @@ private fun LibraryTile(apiClient: ApiClient, item: HomeMediaItem, onClick: () -
         )
         item.year?.let { Text(it.toString(), color = TextDim) }
     }
+}
+
+// LocalContext.current isn't guaranteed to literally be an Activity (a
+// ContextThemeWrapper or similar can sit in between) — walk the wrapper
+// chain to find the real one, the same defensive pattern every "get the
+// Activity from a Composable" recipe uses. Needed below to reach a real
+// Window for WindowCompat.getInsetsController(); there's no way to ask for
+// the IME through a bare Context/View pair alone.
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

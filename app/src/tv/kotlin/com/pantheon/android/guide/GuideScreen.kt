@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -40,6 +41,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -72,7 +74,17 @@ private val NowDark = Color(0xFF352661)
 private val NowLight = Color(0xFF786DBD)
 
 private val COLUMN_WIDTH = 220.dp
-private val HEADER_HEIGHT = 84.dp
+// 56dp, not the original 84dp — that was sized for the old stacked
+// number-over-logo layout; ChannelHeaderCell now lays the two out
+// side-by-side instead (see its own comment), so it doesn't need nearly as
+// much height, and the grid below gets that space back.
+private val HEADER_HEIGHT = 56.dp
+private val PREVIEW_HEIGHT = 260.dp
+// How far the channel-header row (and the rest of GuideGridSection's own
+// bordered panel, since the header sits at its top) reaches up into the
+// preview panel above it — see GuideScreen's own comment for how this is
+// achieved (z-order + a shorter top offset, not a manual negative margin).
+private val HEADER_OVERLAP = 16.dp
 private const val PX_PER_MIN = 2
 private const val THIRTY_MIN_MS = 30 * 60_000L
 
@@ -93,38 +105,51 @@ fun GuideScreen(
     val viewModel: GuideViewModel = viewModel(factory = GuideViewModel.factory(apiClient))
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        // A Box, not a Column — the grid section (drawn second, so it
+        // paints on top) is positioned starting HEADER_OVERLAP above where
+        // the preview visually ends, not right after it in normal flow.
+        // That's what makes the channel-header row (living at the very top
+        // of GuideGridSection's own bordered panel) actually overlap the
+        // preview's bottom edge instead of just butting up against it —
+        // real z-order + position, not a negative-margin hack — and since
+        // the grid section still runs to the bottom of the screen either
+        // way, it gains those HEADER_OVERLAP dp as real usable height too.
+        if (viewModel.hasZone("preview-panel")) {
+            // Home/Library overlay the preview's own top edge instead of
+            // sitting in a separate row above it — that row's own thin
+            // strip of height was never enough to be useful as anything
+            // else, and reclaiming it gives the grid below real room to
+            // actually show more than ~1hr at a time.
+            GuidePreviewPanel(viewModel, onWatch = onWatchChannel, onNavigateHome = onNavigateHome, onNavigateLibrary = onNavigateLibrary)
+        } else {
             // Same quick-action row style as Home's own (Library/Guide),
             // just the reverse pairing — Guide is only ever reached from
             // Home today, so this is both the D-pad affordance and this
-            // screen's own hardware-Back target. Sits above the preview
-            // (not between it and the grid) so it reads as this screen's
-            // header, the same position Home's own quick-action row has.
+            // screen's own hardware-Back target. Only reached when the
+            // manifest omits the preview panel entirely — otherwise these
+            // buttons live inside GuidePreviewPanel's own overlay.
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 12.dp)) {
                 FocusableTextButton(text = "🏠 Home", onClick = onNavigateHome)
                 FocusableTextButton(text = "Library", onClick = onNavigateLibrary, modifier = Modifier.padding(start = 12.dp))
             }
+        }
 
-            if (viewModel.hasZone("preview-panel")) {
-                GuidePreviewPanel(viewModel, onWatch = onWatchChannel)
-            }
-
-            if (viewModel.loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = GoldColor) }
-            } else if (viewModel.errorMessage != null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(viewModel.errorMessage!!, color = TextDim) }
-            } else if (viewModel.hasZone("time-grid") || viewModel.hasZone("channel-header")) {
-                GuideGridSection(apiClient, viewModel, onWatch = onWatchChannel, modifier = Modifier.weight(1f).padding(horizontal = 40.dp, vertical = 12.dp))
-            }
+        val gridAreaModifier = Modifier.fillMaxSize().padding(top = PREVIEW_HEIGHT - HEADER_OVERLAP, start = 40.dp, end = 40.dp, bottom = 12.dp)
+        if (viewModel.loading) {
+            Box(gridAreaModifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = GoldColor) }
+        } else if (viewModel.errorMessage != null) {
+            Box(gridAreaModifier, contentAlignment = Alignment.Center) { Text(viewModel.errorMessage!!, color = TextDim) }
+        } else if (viewModel.hasZone("time-grid") || viewModel.hasZone("channel-header")) {
+            GuideGridSection(apiClient, viewModel, onWatch = onWatchChannel, modifier = gridAreaModifier)
         }
     }
 }
 
 @Composable
-private fun GuidePreviewPanel(viewModel: GuideViewModel, onWatch: (String) -> Unit) {
+private fun GuidePreviewPanel(viewModel: GuideViewModel, onWatch: (String) -> Unit, onNavigateHome: () -> Unit, onNavigateLibrary: () -> Unit) {
     // Default D-pad initial-focus landing isn't guaranteed to land inside
-    // the channel grid now that the Home/Library quick-action row sits
-    // above this panel — select the first channel explicitly so the preview
+    // the channel grid — the Home/Library buttons overlaid below are
+    // composed first — select the first channel explicitly so the preview
     // always has real data from the moment Guide loads, the same safety net
     // the mobile flavor's own GuidePreviewCard already has (touch has no
     // default-focus landing at all to rely on either way).
@@ -132,17 +157,28 @@ private fun GuidePreviewPanel(viewModel: GuideViewModel, onWatch: (String) -> Un
         if (viewModel.focusedChannelId == null) viewModel.channels.firstOrNull()?.let { viewModel.selectChannel(it.channelId) }
     }
 
-    // 260dp — smaller than the 340dp this started at (that left the grid
-    // room for barely an hour of programs at once on a real TV), but taller
-    // than the 200dp this shrank to first (too cramped once the Home/
-    // Library row moved back above it and full detail text came back).
-    Box(modifier = Modifier.fillMaxWidth().height(260.dp)) {
+    // PREVIEW_HEIGHT — smaller than the 340dp this started at (that left
+    // the grid room for barely an hour of programs at once on a real TV).
+    // Home/Library now overlay this panel's own top edge rather than
+    // sitting in a separate row above it, reclaiming that row's height for
+    // the grid; GuideScreen's own grid-section positioning eats another
+    // HEADER_OVERLAP dp off the bottom of this panel too (see its comment).
+    Box(modifier = Modifier.fillMaxWidth().height(PREVIEW_HEIGHT)) {
         PreviewPlayerView(
             manifestUrl = viewModel.previewManifestUrl,
             reloadKey = viewModel.focusedChannelId,
             modifier = Modifier.fillMaxSize(),
         )
         Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.75f))))
+
+        // Semi-opaque TvTextButton, not the fully-transparent
+        // FocusableTextButton Home's own quick-action row uses — this sits
+        // over live video, not a solid background, and needs the same
+        // legibility treatment the old lone "← Back" overlay had.
+        Row(modifier = Modifier.align(Alignment.TopStart).padding(20.dp)) {
+            TvTextButton(text = "🏠 Home", onClick = onNavigateHome)
+            TvTextButton(text = "Library", onClick = onNavigateLibrary, modifier = Modifier.padding(start = 10.dp))
+        }
 
         val channel = viewModel.focusedChannel
         // The preview hero's TEXT follows whatever program is focused (now
@@ -257,6 +293,10 @@ private fun GuideGridSection(apiClient: ApiClient, viewModel: GuideViewModel, on
     }
 }
 
+// Number on the left, logo/name filling the remaining height centered to
+// its right — was a stacked Column (number above, logo below), which is
+// what forced HEADER_HEIGHT as tall as it used to be. Side-by-side needs
+// far less vertical room for the same content.
 @Composable
 private fun ChannelHeaderCell(apiClient: ApiClient, channel: Channel, focused: Boolean, onFocus: () -> Unit, onWatch: () -> Unit) {
     Surface(
@@ -264,16 +304,19 @@ private fun ChannelHeaderCell(apiClient: ApiClient, channel: Channel, focused: B
         modifier = Modifier.width(COLUMN_WIDTH).height(HEADER_HEIGHT).onFocusChanged { if (it.isFocused) onFocus() },
         colors = ClickableSurfaceDefaults.colors(containerColor = if (focused) TileBgLight else TileBg),
     ) {
-        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Text(channel.number.toString(), color = if (focused) GoldColor else TextDim, style = MaterialTheme.typography.titleMedium)
-            if (channel.logoPath != null) {
-                AsyncImage(
-                    model = apiClient.mediaUrl("/api/channels/${channel.channelId}/logo"),
-                    contentDescription = channel.name,
-                    modifier = Modifier.height(20.dp).padding(top = 4.dp),
-                )
-            } else {
-                Text(channel.name, color = TextDim, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        Row(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(channel.number.toString(), color = if (focused) GoldColor else TextDim, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(end = 8.dp))
+            Box(modifier = Modifier.fillMaxHeight().weight(1f), contentAlignment = Alignment.Center) {
+                if (channel.logoPath != null) {
+                    AsyncImage(
+                        model = apiClient.mediaUrl("/api/channels/${channel.channelId}/logo"),
+                        contentDescription = channel.name,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxHeight().padding(vertical = 6.dp),
+                    )
+                } else {
+                    Text(channel.name, color = TextDim, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }
