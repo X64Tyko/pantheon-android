@@ -136,7 +136,7 @@ fun PlayerScreen(
     // including the flush-on-cleanup half (its own effect return function).
     // Gated on viewModel.durationMs (the server-known, ffprobe-derived
     // duration from VodStartResponse), not exoPlayer.duration — a
-    // transcoded (non-direct-play) session's HLS playlist is "event" type
+    // transcoded (non-direct-stream) session's HLS playlist is "event" type
     // (see VodSession.cpp's buildVodArgs comment), which doesn't get
     // #EXT-X-ENDLIST until the *entire* transcode finishes server-side, so
     // ExoPlayer's own duration can stay unset for the whole viewing

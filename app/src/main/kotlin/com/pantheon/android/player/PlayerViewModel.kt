@@ -66,7 +66,7 @@ class PlayerViewModel(
         private set
     var upNextDismissed by mutableStateOf(false)
         private set
-    var directPlay by mutableStateOf(false)
+    var directStream by mutableStateOf(false)
         private set
 
     val isLive: Boolean get() = kind == "channel"
@@ -136,7 +136,7 @@ class PlayerViewModel(
                 manifestUrl = apiClient.streamUrl(res.manifestUrl)
                 title = res.title
                 durationMs = res.durationMs
-                directPlay = res.directPlay
+                directStream = res.directStream
             }.onFailure { e ->
                 errorMessage = e.message ?: "Failed to start playback"
             }
@@ -161,7 +161,7 @@ class PlayerViewModel(
         val absolute = basePositionMs + playerPositionMs
         if (absolute <= 0) return
         viewModelScope.launch { runCatching {
-            apiClient.service.putWatchProgress(kind, contentId, WatchProgressBody(absolute, durationMs, deviceType = deviceType, directPlay = directPlay))
+            apiClient.service.putWatchProgress(kind, contentId, WatchProgressBody(absolute, durationMs, deviceType = deviceType, directStream = directStream))
         } }
     }
 
@@ -170,7 +170,7 @@ class PlayerViewModel(
     fun reportCompleted() {
         if (isLive || durationMs <= 0) return
         viewModelScope.launch { runCatching {
-            apiClient.service.putWatchProgress(kind, contentId, WatchProgressBody(durationMs, durationMs, completed = true, deviceType = deviceType, directPlay = directPlay))
+            apiClient.service.putWatchProgress(kind, contentId, WatchProgressBody(durationMs, durationMs, completed = true, deviceType = deviceType, directStream = directStream))
         } }
     }
 

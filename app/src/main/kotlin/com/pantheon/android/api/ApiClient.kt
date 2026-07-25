@@ -96,7 +96,7 @@ class ApiClient(private val tokenStore: TokenStore) {
         }
         val okHttp = OkHttpClient.Builder()
             // Default 10s read/write is too short for POST /stream/vod/start:
-            // a direct-play session (VodSession::start() ->
+            // a direct-stream session (VodSession::start() ->
             // computeSegmentBoundaries()) runs ffprobe synchronously over the
             // whole file to find real keyframe boundaries before it can
             // respond, which for a movie-length file can legitimately take

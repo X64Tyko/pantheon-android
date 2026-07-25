@@ -132,7 +132,7 @@ interface KairosApi {
     // Declares this device's real decode capability once per session
     // (login/profile-switch/app-launch — see AuthViewModel's own comment on
     // why "once per session," not literally once ever), so VodSession's
-    // direct-play decision can check a source file's actual codecs against
+    // direct-stream decision can check a source file's actual codecs against
     // what this specific client can really play instead of a fixed
     // h264/aac allowlist. forgetClientCapabilities is the logout-time
     // counterpart — see hephaestus/src/stream/ClientCapabilities.h.

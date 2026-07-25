@@ -23,7 +23,7 @@ data class VodStartResponse(
     // tracks) the JSON response still carries for other consumers (e.g.
     // hades/src/player/playbackApi.ts's TrackMenu).
     @SerializedName("manifest_url") val manifestUrl: String,
-    @SerializedName("direct_play") val directPlay: Boolean = false,
+    @SerializedName("direct_stream") val directStream: Boolean = false,
     @SerializedName("duration_ms") val durationMs: Long = 0,
     val title: String = "",
 )
@@ -37,13 +37,13 @@ data class WatchProgressBody(
     // not a new event-reporting pipeline. Nothing client-side reads them
     // back.
     @SerializedName("device_type") val deviceType: String? = null,
-    @SerializedName("direct_play") val directPlay: Boolean? = null,
+    @SerializedName("direct_stream") val directStream: Boolean? = null,
 )
 
 // POST /stream/client-capabilities -- this device's real decode capability
 // (see com.pantheon.android.auth.DeviceCodecCapabilities), keyed server-side
-// by bearer token so VodSession's direct-play decision (hephaestus/src/
-// stream/VodSession.cpp's isDirectPlayable) can check a source file's
+// by bearer token so VodSession's direct-stream decision (hephaestus/src/
+// stream/VodSession.cpp's isDirectStreamable) can check a source file's
 // actual codecs against what *this* client can really play instead of a
 // fixed h264/aac allowlist. ffprobe codec_name values, not MIME types —
 // see DeviceCodecCapabilities' own mapping.

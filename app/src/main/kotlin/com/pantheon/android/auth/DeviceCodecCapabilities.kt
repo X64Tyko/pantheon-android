@@ -12,7 +12,7 @@ import com.pantheon.android.api.dto.ClientCapabilitiesRequest
 // server-side h264/aac allowlist has no way to take advantage of — see
 // hephaestus/src/stream/ClientCapabilities.h for the server side of this.
 //
-// Maps to ffprobe codec_name values (what VodSession.cpp's isDirectPlayable
+// Maps to ffprobe codec_name values (what VodSession.cpp's isDirectStreamable
 // actually compares against), not MediaFormat MIME types — the two use
 // different vocabularies for the same codecs.
 object DeviceCodecCapabilities {
