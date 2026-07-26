@@ -31,9 +31,10 @@ private object Routes {
     const val LIBRARY = "library"
     const val GUIDE = "guide"
     const val DETAIL = "detail/{contentType}/{id}"
-    const val PLAYER = "player/{kind}/{id}?positionMs={positionMs}"
+    const val PLAYER = "player/{kind}/{id}?positionMs={positionMs}&wt={wt}"
     fun detail(contentType: String, id: String) = "detail/$contentType/$id"
-    fun player(kind: String, id: String, positionMs: Long) = "player/$kind/$id?positionMs=$positionMs"
+    fun player(kind: String, id: String, positionMs: Long, wtSessionId: String? = null) =
+        "player/$kind/$id?positionMs=$positionMs&wt=${wtSessionId ?: ""}"
 }
 
 @Composable
@@ -69,6 +70,7 @@ fun PantheonNavHost(tokenStore: TokenStore, apiClient: ApiClient) {
                 apiClient = apiClient,
                 onOpenDetail = { contentType, id -> navController.navigate(Routes.detail(contentType, id)) },
                 onPlay = { kind, id, positionMs -> navController.navigate(Routes.player(kind, id, positionMs)) },
+                onWatchTogether = { kind, id, positionMs, wtSessionId -> navController.navigate(Routes.player(kind, id, positionMs, wtSessionId)) },
                 onNavigateLibrary = { navController.navigate(Routes.LIBRARY) },
                 onNavigateGuide = { navController.navigate(Routes.GUIDE) },
                 onSwitchProfile = { navController.navigate(Routes.PROFILES) },
@@ -100,6 +102,7 @@ fun PantheonNavHost(tokenStore: TokenStore, apiClient: ApiClient) {
                 contentType = contentType,
                 id = id,
                 onPlay = { kind, playId, positionMs -> navController.navigate(Routes.player(kind, playId, positionMs)) },
+                onWatchTogether = { kind, playId, positionMs, wtSessionId -> navController.navigate(Routes.player(kind, playId, positionMs, wtSessionId)) },
                 onBack = { navController.popBackStack() },
             )
         }
@@ -109,16 +112,19 @@ fun PantheonNavHost(tokenStore: TokenStore, apiClient: ApiClient) {
                 navArgument("kind") { type = NavType.StringType },
                 navArgument("id") { type = NavType.StringType },
                 navArgument("positionMs") { type = NavType.LongType; defaultValue = 0L },
+                navArgument("wt") { type = NavType.StringType; nullable = true; defaultValue = null },
             ),
         ) { backStackEntry ->
             val kind = backStackEntry.arguments?.getString("kind") ?: ""
             val id = backStackEntry.arguments?.getString("id") ?: ""
             val positionMs = backStackEntry.arguments?.getLong("positionMs") ?: 0L
+            val wtSessionId = backStackEntry.arguments?.getString("wt")?.takeIf { it.isNotEmpty() }
             PlayerScreen(
                 apiClient = apiClient,
                 kind = kind,
                 contentId = id,
                 initialPositionMs = positionMs,
+                wtSessionId = wtSessionId,
                 onBack = { navController.popBackStack() },
                 // See the mobile flavor's own comment — replace-style
                 // navigation so Back after an auto-advance leaves the

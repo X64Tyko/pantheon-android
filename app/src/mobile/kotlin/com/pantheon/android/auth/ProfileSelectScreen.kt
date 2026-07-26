@@ -41,12 +41,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.pantheon.android.api.dto.AuthUser
-
-private val BgColor = Color(0xFF1B1C29)
-private val GoldColor = Color(0xFFE0B84E)
-private val TextDim = Color(0xFFB5B5C4)
-private val AdminColor = Color(0xFF7C6BD6)
-private val ViewerColor = Color(0xFF3A7CA5)
+import com.pantheon.android.ui.theme.LocalPantheonColors
 
 // Mobile counterpart of hades/src/auth/ProfileSelectPage.tsx — same
 // pick()/switchProfile/PIN/password-fallback logic, touch grid instead of a
@@ -56,6 +51,7 @@ private val ViewerColor = Color(0xFF3A7CA5)
 // Profile" entry point elsewhere in the app (Home's own top bar).
 @Composable
 fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, onSignOutCompletely: () -> Unit) {
+    val colors = LocalPantheonColors.current
     var pinFor by remember { mutableStateOf<AuthUser?>(null) }
     var passwordFor by remember { mutableStateOf<AuthUser?>(null) }
     var pin by remember { mutableStateOf("") }
@@ -86,16 +82,16 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
         viewModel.switchProfile(user, enteredPin, onProfileChosen)
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
+    Surface(modifier = Modifier.fillMaxSize(), color = colors.bg) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(24.dp)) {
-            Text("Who's watching?", style = MaterialTheme.typography.headlineMedium, color = Color.White, modifier = Modifier.padding(bottom = 24.dp))
+            Text("Who's watching?", style = MaterialTheme.typography.headlineMedium, color = colors.txt, modifier = Modifier.padding(bottom = 24.dp))
 
             when {
                 pinFor != null -> {
                     val user = pinFor!!
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().padding(top = 32.dp)) {
                         ProfileAvatar(user, size = 72.dp)
-                        Text(user.username, color = Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
+                        Text(user.username, color = colors.txt, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
                         OutlinedTextField(
                             value = pin,
                             onValueChange = { pin = it.filter(Char::isDigit).take(6) },
@@ -114,7 +110,7 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
                             if (viewModel.pickerBusy) CircularProgressIndicator(modifier = Modifier.size(18.dp)) else Text("Confirm")
                         }
                         TextButton(onClick = { pinFor = null; viewModel.clearPickerError() }, modifier = Modifier.padding(top = 8.dp)) {
-                            Text("← back", color = TextDim)
+                            Text("← back", color = colors.txt2)
                         }
                     }
                 }
@@ -122,10 +118,10 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
                     val user = passwordFor!!
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().padding(top = 32.dp)) {
                         ProfileAvatar(user, size = 72.dp)
-                        Text(user.username, color = Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
+                        Text(user.username, color = colors.txt, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
                         Text(
                             "Admin profiles need a PIN before they can be switched into — sign in with the password instead.",
-                            color = TextDim,
+                            color = colors.txt2,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(top = 8.dp, start = 16.dp, end = 16.dp),
                         )
@@ -147,7 +143,7 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
                             if (viewModel.pickerBusy) CircularProgressIndicator(modifier = Modifier.size(18.dp)) else Text("Sign in")
                         }
                         TextButton(onClick = { passwordFor = null; password = ""; viewModel.clearPickerError() }, modifier = Modifier.padding(top = 8.dp)) {
-                            Text("← back", color = TextDim)
+                            Text("← back", color = colors.txt2)
                         }
                     }
                 }
@@ -165,7 +161,7 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
                     }
                     viewModel.pickerError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
                     TextButton(onClick = onSignOutCompletely, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp)) {
-                        Text("Sign out completely", color = TextDim)
+                        Text("Sign out completely", color = colors.txt2)
                     }
                 }
             }
@@ -175,16 +171,18 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
 
 @Composable
 private fun ProfileAvatar(user: AuthUser, size: androidx.compose.ui.unit.Dp) {
+    val colors = LocalPantheonColors.current
     Box(
-        modifier = Modifier.size(size).clip(CircleShape).background(if (user.role == "admin") AdminColor else ViewerColor),
+        modifier = Modifier.size(size).clip(CircleShape).background(if (user.role == "admin") colors.violetDeep else colors.discoverAccent),
         contentAlignment = Alignment.Center,
     ) {
-        Text(user.username.take(1).uppercase(), color = Color.White, style = MaterialTheme.typography.headlineSmall)
+        Text(user.username.take(1).uppercase(), color = colors.txt, style = MaterialTheme.typography.headlineSmall)
     }
 }
 
 @Composable
 private fun ProfileTile(user: AuthUser, isYou: Boolean, busy: Boolean, onClick: () -> Unit) {
+    val colors = LocalPantheonColors.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.fillMaxWidth().clickable(enabled = !busy, onClick = onClick),
@@ -193,19 +191,19 @@ private fun ProfileTile(user: AuthUser, isYou: Boolean, busy: Boolean, onClick: 
             ProfileAvatar(user, size = 72.dp)
             if (user.hasPin) {
                 Box(
-                    modifier = Modifier.align(Alignment.BottomEnd).size(22.dp).background(BgColor, CircleShape),
+                    modifier = Modifier.align(Alignment.BottomEnd).size(22.dp).background(colors.bg, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) { Text("🔒", style = MaterialTheme.typography.labelSmall) }
             }
         }
-        Text(user.username, color = Color.White, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
-        if (isYou) Text("(you)", color = TextDim, style = MaterialTheme.typography.labelSmall)
+        Text(user.username, color = colors.txt, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+        if (isYou) Text("(you)", color = colors.txt2, style = MaterialTheme.typography.labelSmall)
         if (user.restricted) {
             Text(
                 "RESTRICTED",
-                color = GoldColor,
+                color = colors.gold,
                 style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.padding(top = 2.dp).background(Color(0x33E0B84E), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
+                modifier = Modifier.padding(top = 2.dp).background(colors.gold.copy(alpha = 0.2f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
             )
         }
     }

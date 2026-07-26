@@ -157,6 +157,11 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:3.0.0")
     implementation("com.squareup.okhttp3:okhttp:5.4.0")
     implementation("com.squareup.okhttp3:logging-interceptor:5.4.0")
+    // Watch Together's live coordination feed (Hermes' GET /watch-together/:id/stream,
+    // a Server-Sent Events endpoint) — Retrofit has no SSE support of its own,
+    // and this is the first thing in the app that needs to consume one; see
+    // ApiClient.kt's openWatchTogetherStream.
+    implementation("com.squareup.okhttp3:okhttp-sse:5.4.0")
 
     // Secure token storage — Keystore-backed, never plain SharedPreferences.
     implementation("androidx.security:security-crypto:1.1.0")

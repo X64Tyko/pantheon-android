@@ -42,8 +42,7 @@ import com.pantheon.android.filter.FilterTreeState
 import com.pantheon.android.filter.RESOLUTIONS
 import com.pantheon.android.filter.SORT_DEFS
 import com.pantheon.android.filter.ValueType
-
-private val TileBorder = Color(0xFF2E2F45)
+import com.pantheon.android.ui.theme.LocalPantheonColors
 
 // TV counterpart of the mobile flavor's FilterPanel — same FilterTreeState/
 // FIELD_DEFS rule builder (real usage feedback: "just like the web
@@ -77,24 +76,25 @@ fun TvFilterPanel(
     onReroll: () -> Unit,
     onClose: () -> Unit,
 ) {
+    val colors = LocalPantheonColors.current
     val doneFocusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { doneFocusRequester.requestFocus() }
 
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-    Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
+    Box(modifier = Modifier.fillMaxSize().background(colors.bg)) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 20.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Filters", style = MaterialTheme.typography.headlineSmall, color = Color.White, modifier = Modifier.weight(1f))
+                Text("Filters", style = MaterialTheme.typography.headlineSmall, color = colors.txt, modifier = Modifier.weight(1f))
                 TvTextButton(text = "Done", onClick = onClose, modifier = Modifier.focusRequester(doneFocusRequester))
             }
 
             LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 40.dp)) {
                 if (libraries.isNotEmpty()) {
                     item {
-                        Text("Libraries", color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+                        Text("Libraries", color = colors.txt2, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 10.dp)) {
                             items(libraries, key = { it.libraryId }) { lib ->
                                 TvChip(lib.displayName, lib.libraryId in selectedLibraryIds) { onToggleLibrary(lib.libraryId) }
@@ -106,7 +106,7 @@ fun TvFilterPanel(
                 if (sortOptions.isNotEmpty()) {
                     item {
                         val dirless = SORT_DEFS[sort]?.dirless ?: false
-                        Text("Sort", color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+                        Text("Sort", color = colors.txt2, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 10.dp)) {
                             items(sortOptions, key = { it }) { s ->
                                 TvChip(SORT_DEFS[s]?.label ?: s, sort == s) { onSetSort(s) }
@@ -126,12 +126,12 @@ fun TvFilterPanel(
                 if (availableFields.isNotEmpty()) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp, bottom = 10.dp)) {
-                            Text("Match", color = TextDim)
+                            Text("Match", color = colors.txt2)
                             Row(modifier = Modifier.padding(horizontal = 10.dp)) {
                                 TvChip("All", tree.match == "all") { tree.updateMatch("all") }
                                 Box(Modifier.padding(start = 8.dp)) { TvChip("Any", tree.match == "any") { tree.updateMatch("any") } }
                             }
-                            Text("of the following:", color = TextDim)
+                            Text("of the following:", color = colors.txt2)
                         }
                     }
 
@@ -145,15 +145,15 @@ fun TvFilterPanel(
                                 onRemove = { tree.removeItem(item.id) },
                             )
                             is FilterItem.GroupItem -> Column(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).border(1.dp, TileBorder, RoundedCornerShape(8.dp)).padding(14.dp),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).border(1.dp, colors.glassBorder, RoundedCornerShape(8.dp)).padding(14.dp),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Match", color = TextDim)
+                                    Text("Match", color = colors.txt2)
                                     Row(modifier = Modifier.padding(horizontal = 10.dp)) {
                                         TvChip("All", item.group.match == "all") { tree.setGroupMatch(item.id, "all") }
                                         Box(Modifier.padding(start = 8.dp)) { TvChip("Any", item.group.match == "any") { tree.setGroupMatch(item.id, "any") } }
                                     }
-                                    Text("within this group", color = TextDim, modifier = Modifier.weight(1f))
+                                    Text("within this group", color = colors.txt2, modifier = Modifier.weight(1f))
                                     TvTextButton(text = "✕ remove group", onClick = { tree.removeItem(item.id) })
                                 }
                                 item.group.rules.forEach { rule ->
@@ -191,6 +191,7 @@ private fun TvFilterRuleRow(
     onUpdate: (field: String?, op: String?, value: String?) -> Unit,
     onRemove: () -> Unit,
 ) {
+    val colors = LocalPantheonColors.current
     val def = FIELD_DEFS[rule.field]
     var suggestions by remember(rule.field) { mutableStateOf<List<String>>(emptyList()) }
 
@@ -199,7 +200,7 @@ private fun TvFilterRuleRow(
     }
 
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
-        Text("Field", color = TextDim, style = MaterialTheme.typography.labelSmall)
+        Text("Field", color = colors.txt2, style = MaterialTheme.typography.labelSmall)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
             items(availableFields.mapNotNull { FIELD_DEFS[it] }, key = { it.field }) { fd ->
                 TvChip(fd.label, fd.field == rule.field) { onUpdate(fd.field, null, null) }
@@ -207,7 +208,7 @@ private fun TvFilterRuleRow(
         }
 
         def?.let { fieldDef ->
-            Text("Operator", color = TextDim, style = MaterialTheme.typography.labelSmall)
+            Text("Operator", color = colors.txt2, style = MaterialTheme.typography.labelSmall)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
                 items(fieldDef.ops, key = { it.id }) { op ->
                     TvChip(op.label, op.id == rule.op) { onUpdate(null, op.id, null) }

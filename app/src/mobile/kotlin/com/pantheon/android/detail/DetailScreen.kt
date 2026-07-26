@@ -47,13 +47,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.MediaLanguages
+import com.pantheon.android.ui.theme.LocalPantheonColors
 import kotlinx.coroutines.launch
-
-private val BgColor = Color(0xFF1B1C29)
-private val GoldColor = Color(0xFFE0B84E)
-private val TextDim = Color(0xFFB5B5C4)
-private val TileBg = Color(0xFF232438)
-private val SlateGray = Color(0xFF4A4E5A)
 
 private val HERO_HEIGHT = 220.dp
 
@@ -74,11 +69,14 @@ fun DetailScreen(
     contentType: String,
     id: String,
     onPlay: (kind: String, id: String, positionMs: Long) -> Unit,
+    onWatchTogether: (kind: String, id: String, positionMs: Long, wtSessionId: String) -> Unit,
     onBack: () -> Unit,
 ) {
     val viewModel: DetailViewModel = viewModel(factory = DetailViewModel.factory(apiClient, contentType, id))
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val colors = LocalPantheonColors.current
+    var watchTogetherLoading by remember { mutableStateOf(false) }
 
     var selectedEpisodeId by remember { mutableStateOf<String?>(null) }
     val selectedEpisode = remember(selectedEpisodeId, viewModel.seasons) {
@@ -103,13 +101,25 @@ fun DetailScreen(
         viewModel.playFromBeginningTarget()?.let { onPlay(it.kind, it.id, it.positionMs) }
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
+    fun goWatchTogether() {
+        watchTogetherLoading = true
+        scope.launch {
+            val result = viewModel.createWatchTogether()
+            watchTogetherLoading = false
+            if (result != null) {
+                val (target, sessionId) = result
+                onWatchTogether(target.kind, target.id, target.positionMs, sessionId)
+            }
+        }
+    }
+
+    Surface(modifier = Modifier.fillMaxSize(), color = colors.bg) {
         if (viewModel.loading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = GoldColor) }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = colors.gold) }
             return@Surface
         }
         viewModel.errorMessage?.let { message ->
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(message, color = TextDim) }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(message, color = colors.txt2) }
             return@Surface
         }
 
@@ -150,12 +160,12 @@ fun DetailScreen(
                                 )
                                 Box(modifier = Modifier.matchParentSize().background(BackdropScrimBrush))
                             } else {
-                                Box(modifier = Modifier.matchParentSize().background(SlateGray))
+                                Box(modifier = Modifier.matchParentSize().background(colors.bg4))
                             }
                         }
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-                                Box(modifier = Modifier.width(110.dp).aspectRatio(2f / 3f).background(TileBg)) {
+                                Box(modifier = Modifier.width(110.dp).aspectRatio(2f / 3f).background(colors.bg3)) {
                                     AsyncImage(
                                         model = viewModel.thumb?.let { apiClient.mediaUrl("/api/${if (contentType == "show") "shows" else "movies"}/$id/thumb") },
                                         contentDescription = viewModel.title,
@@ -167,16 +177,16 @@ fun DetailScreen(
                                     Text(
                                         selectedEpisode?.title ?: viewModel.title,
                                         style = MaterialTheme.typography.headlineSmall.copy(shadow = TitleTextShadow),
-                                        color = Color.White,
+                                        color = colors.txt,
                                     )
 
                                     if (viewModel.hasZone("meta-block")) {
                                         Row(modifier = Modifier.padding(top = 4.dp)) {
                                             viewModel.metaFields.forEach { field ->
                                                 when (field) {
-                                                    "year" -> viewModel.year?.let { Text("$it  ", color = Color.White) }
-                                                    "rating" -> viewModel.rating?.let { Text("★ ${"%.1f".format(it)}  ", color = Color.White) }
-                                                    "content_type" -> Text(if (contentType == "show") "series  " else "film  ", color = Color.White)
+                                                    "year" -> viewModel.year?.let { Text("$it  ", color = colors.txt) }
+                                                    "rating" -> viewModel.rating?.let { Text("★ ${"%.1f".format(it)}  ", color = colors.txt) }
+                                                    "content_type" -> Text(if (contentType == "show") "series  " else "film  ", color = colors.txt)
                                                 }
                                             }
                                         }
@@ -190,6 +200,16 @@ fun DetailScreen(
                                                 modifier = Modifier.padding(start = 10.dp),
                                             ) { Text("Play from Beginning") }
                                         }
+                                        // Movies and shows only (Kairos's own
+                                        // content_type gate on POST
+                                        // /api/watch-together) — never shown for
+                                        // a channel since this screen doesn't
+                                        // apply to those anyway.
+                                        androidx.compose.material3.OutlinedButton(
+                                            onClick = ::goWatchTogether,
+                                            enabled = !watchTogetherLoading,
+                                            modifier = Modifier.padding(top = 8.dp),
+                                        ) { Text(if (watchTogetherLoading) "Starting…" else "Watch Together") }
                                     }
                                 }
                             }
@@ -201,7 +221,7 @@ fun DetailScreen(
                                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                                 ) {
                                     items(viewModel.genres, key = { it }) { g ->
-                                        Text(g, color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.background(TileBg).padding(horizontal = 10.dp, vertical = 4.dp))
+                                        Text(g, color = colors.txt2, style = MaterialTheme.typography.labelMedium, modifier = Modifier.background(colors.bg3).padding(horizontal = 10.dp, vertical = 4.dp))
                                     }
                                 }
                             }
@@ -211,7 +231,7 @@ fun DetailScreen(
                                 var overflowing by remember { mutableStateOf(false) }
                                 Text(
                                     overviewText,
-                                    color = TextDim,
+                                    color = colors.txt2,
                                     maxLines = 3,
                                     overflow = TextOverflow.Ellipsis,
                                     onTextLayout = { result -> overflowing = result.hasVisualOverflow },
@@ -219,7 +239,7 @@ fun DetailScreen(
                                 )
                                 if (overflowing) {
                                     TextButton(onClick = { overviewDialogOpen = true }, modifier = Modifier.padding(horizontal = 12.dp)) {
-                                        Text("Read more", color = GoldColor)
+                                        Text("Read more", color = colors.gold)
                                     }
                                 }
                             }
@@ -251,9 +271,9 @@ fun DetailScreen(
                                     .padding(horizontal = 20.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(season.name, style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.weight(1f))
-                                Text("${season.episodes.size} episode${if (season.episodes.size == 1) "" else "s"}", color = TextDim, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 10.dp))
-                                Text(if (expanded) "⌄" else "›", color = TextDim, style = MaterialTheme.typography.titleMedium)
+                                Text(season.name, style = MaterialTheme.typography.titleMedium, color = colors.txt, modifier = Modifier.weight(1f))
+                                Text("${season.episodes.size} episode${if (season.episodes.size == 1) "" else "s"}", color = colors.txt2, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 10.dp))
+                                Text(if (expanded) "⌄" else "›", color = colors.txt2, style = MaterialTheme.typography.titleMedium)
                             }
                             if (!expanded) return@Column
                             LazyRow(
@@ -267,7 +287,7 @@ fun DetailScreen(
                                             if (isSelected) onPlay("episode", ep.episodeId, 0) else selectedEpisodeId = ep.episodeId
                                         },
                                     ) {
-                                        Box(modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(TileBg)) {
+                                        Box(modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(colors.bg3)) {
                                             AsyncImage(
                                                 model = ep.thumb?.let { apiClient.mediaUrl("/api/episodes/${ep.episodeId}/thumb") },
                                                 contentDescription = ep.title,
@@ -277,18 +297,18 @@ fun DetailScreen(
                                             if (isSelected) {
                                                 Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)))
                                                 Box(
-                                                    modifier = Modifier.align(Alignment.Center).background(GoldColor, RoundedCornerShape(50))
+                                                    modifier = Modifier.align(Alignment.Center).background(colors.gold, RoundedCornerShape(50))
                                                         .clickable { onPlay("episode", ep.episodeId, 0) }
                                                         .padding(10.dp),
                                                 ) {
-                                                    Text("▶", color = Color.Black)
+                                                    Text("▶", color = colors.txtOnGold)
                                                 }
                                             }
                                         }
                                         Text(
                                             "E${ep.episode}  ${ep.title}",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = if (isSelected) GoldColor else Color.White,
+                                            color = if (isSelected) colors.gold else colors.txt,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.padding(top = 4.dp),
@@ -305,20 +325,21 @@ fun DetailScreen(
                 item(key = "bottom-spacer") { Spacer(modifier = Modifier.height(32.dp)) }
             }
 
-            TextButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)) { Text("← Back", color = Color.White) }
+            TextButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)) { Text("← Back", color = colors.txt) }
         }
     }
 }
 
 @Composable
 private fun OverviewDialog(title: String, overview: String, onClose: () -> Unit) {
+    val colors = LocalPantheonColors.current
     Dialog(onDismissRequest = onClose) {
-        Surface(color = BgColor, shape = RoundedCornerShape(12.dp)) {
+        Surface(color = colors.bg, shape = RoundedCornerShape(12.dp)) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text(title, style = MaterialTheme.typography.titleLarge, color = Color.White)
-                Text(overview, color = TextDim, modifier = Modifier.padding(top = 12.dp))
+                Text(title, style = MaterialTheme.typography.titleLarge, color = colors.txt)
+                Text(overview, color = colors.txt2, modifier = Modifier.padding(top = 12.dp))
                 TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End).padding(top = 12.dp)) {
-                    Text("Close", color = GoldColor)
+                    Text("Close", color = colors.gold)
                 }
             }
         }
@@ -329,22 +350,23 @@ private const val MAX_VISIBLE_LANGUAGES = 4
 
 @Composable
 private fun LanguageRow(label: String, codes: List<String>, onShowAll: () -> Unit) {
+    val colors = LocalPantheonColors.current
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(end = 8.dp))
+        Text(label, color = colors.txt2, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(end = 8.dp))
         codes.take(MAX_VISIBLE_LANGUAGES).forEach { code ->
             Text(
                 languageDisplayName(code),
-                color = TextDim,
+                color = colors.txt2,
                 style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.background(TileBg, RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 3.dp).padding(end = 6.dp),
+                modifier = Modifier.background(colors.bg3, RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 3.dp).padding(end = 6.dp),
             )
         }
         if (codes.size > MAX_VISIBLE_LANGUAGES) {
             Text(
                 "+${codes.size - MAX_VISIBLE_LANGUAGES} more",
-                color = GoldColor,
+                color = colors.gold,
                 style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.clickable(onClick = onShowAll).background(TileBg, RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+                modifier = Modifier.clickable(onClick = onShowAll).background(colors.bg3, RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
             )
         }
     }
@@ -352,20 +374,21 @@ private fun LanguageRow(label: String, codes: List<String>, onShowAll: () -> Uni
 
 @Composable
 private fun LanguagesDialog(languages: MediaLanguages, onClose: () -> Unit) {
+    val colors = LocalPantheonColors.current
     Dialog(onDismissRequest = onClose) {
-        Surface(color = BgColor, shape = RoundedCornerShape(12.dp)) {
+        Surface(color = colors.bg, shape = RoundedCornerShape(12.dp)) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text("Languages", style = MaterialTheme.typography.titleLarge, color = Color.White)
+                Text("Languages", style = MaterialTheme.typography.titleLarge, color = colors.txt)
                 languages.audio?.takeIf { it.isNotEmpty() }?.let { codes ->
-                    Text("Audio", color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 14.dp))
-                    Text(codes.joinToString(", ") { languageDisplayName(it) }, color = Color.White, modifier = Modifier.padding(top = 4.dp))
+                    Text("Audio", color = colors.txt2, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 14.dp))
+                    Text(codes.joinToString(", ") { languageDisplayName(it) }, color = colors.txt, modifier = Modifier.padding(top = 4.dp))
                 }
                 languages.subtitle?.takeIf { it.isNotEmpty() }?.let { codes ->
-                    Text("Subtitles", color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 14.dp))
-                    Text(codes.joinToString(", ") { languageDisplayName(it) }, color = Color.White, modifier = Modifier.padding(top = 4.dp))
+                    Text("Subtitles", color = colors.txt2, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 14.dp))
+                    Text(codes.joinToString(", ") { languageDisplayName(it) }, color = colors.txt, modifier = Modifier.padding(top = 4.dp))
                 }
                 TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End).padding(top = 16.dp)) {
-                    Text("Close", color = GoldColor)
+                    Text("Close", color = colors.gold)
                 }
             }
         }

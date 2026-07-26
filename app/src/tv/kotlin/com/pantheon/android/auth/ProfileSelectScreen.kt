@@ -33,13 +33,8 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.pantheon.android.api.dto.AuthUser
-import com.pantheon.android.library.BgColor
-import com.pantheon.android.library.GoldColor
-import com.pantheon.android.library.TextDim
 import com.pantheon.android.library.TvTextButton
-
-private val AdminColor = Color(0xFF7C6BD6)
-private val ViewerColor = Color(0xFF3A7CA5)
+import com.pantheon.android.ui.theme.LocalPantheonColors
 
 // TV counterpart of the mobile flavor's ProfileSelectScreen.kt — same
 // AuthViewModel picker state/logic (pick/PIN/password-fallback), D-pad-
@@ -50,6 +45,7 @@ private val ViewerColor = Color(0xFF3A7CA5)
 // small enough a single scrollable row never needs that.
 @Composable
 fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, onSignOutCompletely: () -> Unit) {
+    val colors = LocalPantheonColors.current
     var pinFor by remember { mutableStateOf<AuthUser?>(null) }
     var passwordFor by remember { mutableStateOf<AuthUser?>(null) }
     var pin by remember { mutableStateOf("") }
@@ -78,16 +74,16 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
         viewModel.switchProfile(user, enteredPin, onProfileChosen)
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
+    Box(modifier = Modifier.fillMaxSize().background(colors.bg)) {
         Column(modifier = Modifier.fillMaxSize().padding(40.dp)) {
-            Text("Who's watching?", style = MaterialTheme.typography.headlineMedium, color = Color.White, modifier = Modifier.padding(bottom = 32.dp))
+            Text("Who's watching?", style = MaterialTheme.typography.headlineMedium, color = colors.txt, modifier = Modifier.padding(bottom = 32.dp))
 
             when {
                 pinFor != null -> {
                     val user = pinFor!!
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         TvProfileAvatar(user, size = 96.dp)
-                        Text(user.username, color = Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
+                        Text(user.username, color = colors.txt, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
                         OutlinedTextField(
                             value = pin,
                             onValueChange = { pin = it.filter(Char::isDigit).take(6) },
@@ -97,7 +93,7 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
                             singleLine = true,
                             modifier = Modifier.padding(top = 24.dp).size(width = 200.dp, height = 60.dp),
                         )
-                        viewModel.pickerError?.let { Text(it, color = Color(0xFFE05A5A), modifier = Modifier.padding(top = 8.dp)) }
+                        viewModel.pickerError?.let { Text(it, color = colors.matchRed, modifier = Modifier.padding(top = 8.dp)) }
                         TvTextButton(text = if (viewModel.pickerBusy) "…" else "Confirm", onClick = { pick(user, pin) })
                         TvTextButton(text = "← back", onClick = { pinFor = null; viewModel.clearPickerError() })
                     }
@@ -106,10 +102,10 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
                     val user = passwordFor!!
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         TvProfileAvatar(user, size = 96.dp)
-                        Text(user.username, color = Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
+                        Text(user.username, color = colors.txt, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
                         Text(
                             "Admin profiles need a PIN before they can be switched into — sign in with the password instead.",
-                            color = TextDim,
+                            color = colors.txt2,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(top = 8.dp),
                         )
@@ -122,7 +118,7 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
                             singleLine = true,
                             modifier = Modifier.padding(top = 24.dp).size(width = 320.dp, height = 60.dp),
                         )
-                        viewModel.pickerError?.let { Text(it, color = Color(0xFFE05A5A), modifier = Modifier.padding(top = 8.dp)) }
+                        viewModel.pickerError?.let { Text(it, color = colors.matchRed, modifier = Modifier.padding(top = 8.dp)) }
                         TvTextButton(text = if (viewModel.pickerBusy) "…" else "Sign in", onClick = { viewModel.loginAsProfile(user.username, password, onProfileChosen) })
                         TvTextButton(text = "← back", onClick = { passwordFor = null; password = ""; viewModel.clearPickerError() })
                     }
@@ -136,7 +132,7 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
                             TvProfileTile(user = user, isYou = viewModel.isCurrentProfile(user), onClick = { pick(user) })
                         }
                     }
-                    viewModel.pickerError?.let { Text(it, color = Color(0xFFE05A5A), modifier = Modifier.padding(top = 16.dp)) }
+                    viewModel.pickerError?.let { Text(it, color = colors.matchRed, modifier = Modifier.padding(top = 16.dp)) }
                     TvTextButton(text = "Sign out completely", onClick = onSignOutCompletely)
                 }
             }
@@ -146,35 +142,37 @@ fun ProfileSelectScreen(viewModel: AuthViewModel, onProfileChosen: () -> Unit, o
 
 @Composable
 private fun TvProfileAvatar(user: AuthUser, size: androidx.compose.ui.unit.Dp) {
+    val colors = LocalPantheonColors.current
     Box(
-        modifier = Modifier.size(size).clip(CircleShape).background(if (user.role == "admin") AdminColor else ViewerColor),
+        modifier = Modifier.size(size).clip(CircleShape).background(if (user.role == "admin") colors.violetDeep else colors.discoverAccent),
         contentAlignment = Alignment.Center,
     ) {
-        Text(user.username.take(1).uppercase(), color = Color.White, style = MaterialTheme.typography.headlineMedium)
+        Text(user.username.take(1).uppercase(), color = colors.txt, style = MaterialTheme.typography.headlineMedium)
     }
 }
 
 @Composable
 private fun TvProfileTile(user: AuthUser, isYou: Boolean, onClick: () -> Unit) {
+    val colors = LocalPantheonColors.current
     var focused by remember { mutableStateOf(false) }
     Surface(
         onClick = onClick,
         modifier = Modifier.onFocusChanged { focused = it.isFocused },
-        colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color(0xFF2E2F45)),
+        colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = colors.bg4),
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(20.dp)) {
             Box {
                 TvProfileAvatar(user, size = 96.dp)
                 if (user.hasPin) {
                     Box(
-                        modifier = Modifier.align(Alignment.BottomEnd).size(26.dp).background(BgColor, CircleShape),
+                        modifier = Modifier.align(Alignment.BottomEnd).size(26.dp).background(colors.bg, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) { Text("🔒", style = MaterialTheme.typography.labelSmall) }
                 }
             }
-            Text(user.username, color = if (focused) GoldColor else Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 10.dp))
-            if (isYou) Text("(you)", color = TextDim, style = MaterialTheme.typography.labelSmall)
-            if (user.restricted) Text("RESTRICTED", color = GoldColor, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 2.dp))
+            Text(user.username, color = if (focused) colors.gold else colors.txt, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 10.dp))
+            if (isYou) Text("(you)", color = colors.txt2, style = MaterialTheme.typography.labelSmall)
+            if (user.restricted) Text("RESTRICTED", color = colors.gold, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }

@@ -40,11 +40,9 @@ import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.TvHomeRow
 import com.pantheon.android.api.dto.TvItemAction
 import com.pantheon.android.api.dto.WatchProgress
+import com.pantheon.android.api.dto.WatchTogetherSession
+import com.pantheon.android.ui.theme.LocalPantheonColors
 import kotlinx.coroutines.launch
-
-private val BgColor = Color(0xFF1B1C29)
-private val GoldColor = Color(0xFFE0B84E)
-private val TextDim = Color(0xFFB5B5C4)
 
 // TV counterpart of the mobile flavor's HomeScreen.kt — same HomeViewModel,
 // same manifest/action-dispatch logic, different rendering toolkit
@@ -56,12 +54,35 @@ fun HomeScreen(
     apiClient: ApiClient,
     onOpenDetail: (contentType: String, id: String) -> Unit,
     onPlay: (kind: String, id: String, positionMs: Long) -> Unit,
+    onWatchTogether: (kind: String, id: String, positionMs: Long, wtSessionId: String) -> Unit,
     onNavigateLibrary: () -> Unit,
     onNavigateGuide: () -> Unit,
     onSwitchProfile: () -> Unit,
 ) {
     val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(apiClient))
+    val colors = LocalPantheonColors.current
     val scope = rememberCoroutineScope()
+
+    // join() returns the host's current position along with the usual
+    // membership write, so the new VOD session can start there instead of
+    // at 0 and relying on a later sync correction — mirrors the mobile
+    // flavor's own HomeScreen.kt.
+    fun joinWatchTogether(session: WatchTogetherSession) {
+        scope.launch {
+            val joined = runCatching { apiClient.service.joinWatchTogether(session.sessionId) }.getOrNull() ?: return@launch
+            onWatchTogether(session.contentType, session.contentId, joined.positionMs, session.sessionId)
+        }
+    }
+
+    fun closeWatchTogether(session: WatchTogetherSession) {
+        val isHost = apiClient.currentUserId == session.hostUserId
+        scope.launch {
+            runCatching {
+                if (isHost) apiClient.service.closeWatchTogether(session.sessionId) else apiClient.service.leaveWatchTogether(session.sessionId)
+            }
+            viewModel.removeWatchTogether(session.sessionId)
+        }
+    }
 
     // "Play" from any shelf resumes real progress, not just the dedicated
     // Continue Watching row — every content_type now has a server-side
@@ -98,13 +119,13 @@ fun HomeScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
+    Box(modifier = Modifier.fillMaxSize().background(colors.bg)) {
         if (viewModel.loading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = GoldColor)
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = colors.gold)
             return@Box
         }
         viewModel.errorMessage?.let { message ->
-            Text(message, color = TextDim, modifier = Modifier.align(Alignment.Center))
+            Text(message, color = colors.txt2, modifier = Modifier.align(Alignment.Center))
             return@Box
         }
 
@@ -132,6 +153,16 @@ fun HomeScreen(
                     }
                     Box(modifier = Modifier.weight(1f))
                     FocusableTextButton(text = "👤 Switch Profile", onClick = onSwitchProfile)
+                }
+            }
+            if (viewModel.watchTogether.isNotEmpty()) {
+                item {
+                    WatchTogetherZone(
+                        apiClient = apiClient,
+                        items = viewModel.watchTogether,
+                        onJoin = ::joinWatchTogether,
+                        onClose = ::closeWatchTogether,
+                    )
                 }
             }
             items(viewModel.rows.filter { it.type != "hero" && it.type != "guide" }, key = { it.id }) { row ->
@@ -170,8 +201,9 @@ private fun HeroZone(
     onPlay: (HomeMediaItem) -> Unit,
     onViewDetail: (HomeMediaItem) -> Unit,
 ) {
+    val colors = LocalPantheonColors.current
     val item = viewModel.heroItem ?: return
-    Box(modifier = Modifier.fillMaxWidth().height(420.dp).background(Color(0xFF1F2033))) {
+    Box(modifier = Modifier.fillMaxWidth().height(420.dp).background(colors.bg2)) {
         AsyncImage(
             model = item.artUrl(apiClient),
             contentDescription = item.title,
@@ -179,7 +211,7 @@ private fun HeroZone(
             modifier = Modifier.fillMaxSize(),
         )
         Column(modifier = Modifier.align(Alignment.BottomStart).padding(40.dp)) {
-            Text(item.title, style = MaterialTheme.typography.headlineLarge, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(item.title, style = MaterialTheme.typography.headlineLarge, color = colors.txt, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(modifier = Modifier.padding(top = 16.dp)) {
                 Button(onClick = { onPlay(item) }) { Text("▶  Play") }
                 FocusableTextButton(text = "View Details", onClick = { onViewDetail(item) }, modifier = Modifier.padding(start = 16.dp))
@@ -202,8 +234,9 @@ private fun ShelfZone(
     onItemClick: (HomeMediaItem) -> Unit,
     onEndTileClick: (() -> Unit)?,
 ) {
+    val colors = LocalPantheonColors.current
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.padding(horizontal = 40.dp, vertical = 6.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium, color = colors.txt, modifier = Modifier.padding(horizontal = 40.dp, vertical = 6.dp))
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 40.dp),
@@ -216,6 +249,7 @@ private fun ShelfZone(
 
 @Composable
 private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, onClick: () -> Unit) {
+    val colors = LocalPantheonColors.current
     var focused by remember { mutableStateOf(false) }
     Column(modifier = Modifier.width(140.dp)) {
         Surface(
@@ -224,25 +258,26 @@ private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, onClick: () -> 
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .onFocusChanged { focused = it.isFocused },
-            colors = ClickableSurfaceDefaults.colors(containerColor = Color(0xFF232438)),
+            colors = ClickableSurfaceDefaults.colors(containerColor = colors.bg3),
         ) {
             AsyncImage(model = item.thumbUrl(apiClient), contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
         Text(
             item.title,
             style = MaterialTheme.typography.bodyMedium,
-            color = if (focused) GoldColor else Color.White,
+            color = if (focused) colors.gold else colors.txt,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp),
         )
-        item.year?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall, color = TextDim) }
+        item.year?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall, color = colors.txt2) }
     }
 }
 
 @Composable
 private fun ContinueWatchingZone(apiClient: ApiClient, items: List<WatchProgress>, onClick: (WatchProgress) -> Unit) {
+    val colors = LocalPantheonColors.current
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
-        Text("Continue Watching", style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.padding(horizontal = 40.dp, vertical = 6.dp))
+        Text("Continue Watching", style = MaterialTheme.typography.titleMedium, color = colors.txt, modifier = Modifier.padding(horizontal = 40.dp, vertical = 6.dp))
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 40.dp),
@@ -255,16 +290,16 @@ private fun ContinueWatchingZone(apiClient: ApiClient, items: List<WatchProgress
                     Surface(
                         onClick = { onClick(cw) },
                         modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f),
-                        colors = ClickableSurfaceDefaults.colors(containerColor = Color(0xFF232438)),
+                        colors = ClickableSurfaceDefaults.colors(containerColor = colors.bg3),
                     ) {
                         Box {
                             AsyncImage(model = path?.let { apiClient.mediaUrl(it) }, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                             Box(modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color.Black.copy(alpha = 0.5f))) {
-                                Box(modifier = Modifier.fillMaxWidth(progress).height(4.dp).background(GoldColor))
+                                Box(modifier = Modifier.fillMaxWidth(progress).height(4.dp).background(colors.gold))
                             }
                         }
                     }
-                    Text(title, style = MaterialTheme.typography.bodyMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                    Text(title, style = MaterialTheme.typography.bodyMedium, color = colors.txt, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
                 }
             }
         }
@@ -273,13 +308,14 @@ private fun ContinueWatchingZone(apiClient: ApiClient, items: List<WatchProgress
 
 @Composable
 private fun EndTile(onClick: () -> Unit) {
+    val colors = LocalPantheonColors.current
     Surface(
         onClick = onClick,
         modifier = Modifier.width(140.dp).aspectRatio(2f / 3f),
-        colors = ClickableSurfaceDefaults.colors(containerColor = Color(0xFF232438)),
+        colors = ClickableSurfaceDefaults.colors(containerColor = colors.bg3),
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Continue in\nLibrary", color = TextDim, style = MaterialTheme.typography.labelMedium)
+            Text("Continue in\nLibrary", color = colors.txt2, style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -290,11 +326,81 @@ private fun EndTile(onClick: () -> Unit) {
 // hades/src/channel/sharedStyles.module.css's ghostBtn class uses on web.
 @Composable
 private fun FocusableTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalPantheonColors.current
     Surface(
         onClick = onClick,
         modifier = modifier,
         colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent),
     ) {
-        Text(text, color = Color.White, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        Text(text, color = colors.txt, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+    }
+}
+
+// Every currently-open Watch Together session, any account — TV counterpart
+// of the mobile flavor's own WatchTogetherZone/Card. D-pad-focusable
+// tv.material3 Surface instead of a touch tap target; OK/DPAD_CENTER joins
+// directly, matching how every other TV shelf card here already behaves
+// (no separate hover-to-reveal-actions state on this platform either).
+@Composable
+private fun WatchTogetherZone(
+    apiClient: ApiClient,
+    items: List<WatchTogetherSession>,
+    onJoin: (WatchTogetherSession) -> Unit,
+    onClose: (WatchTogetherSession) -> Unit,
+) {
+    val colors = LocalPantheonColors.current
+    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+        Text("Watch Together", style = MaterialTheme.typography.titleMedium, color = colors.txt, modifier = Modifier.padding(horizontal = 40.dp, vertical = 6.dp))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 40.dp),
+        ) {
+            items(items, key = { it.sessionId }) { session ->
+                WatchTogetherCard(apiClient, session, onJoin = { onJoin(session) }, onClose = { onClose(session) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun WatchTogetherCard(apiClient: ApiClient, session: WatchTogetherSession, onJoin: () -> Unit, onClose: () -> Unit) {
+    val colors = LocalPantheonColors.current
+    var focused by remember { mutableStateOf(false) }
+    // Host may close their own session directly from the shelf without
+    // joining it first — admin-role check not available client-side without
+    // extra plumbing, same trimmed scope as the mobile flavor's own card.
+    val canClose = apiClient.currentUserId == session.hostUserId
+    val thumbPath = if (session.contentType == "movie") "/api/movies/${session.contentId}/thumb"
+                    else session.showId?.let { "/api/shows/$it/thumb" }
+    val displayTitle = if (session.contentType == "episode") session.showTitle ?: session.title else session.title
+    val epCode = if (session.contentType == "episode") {
+        "S${(session.season ?: 0).toString().padStart(2, '0')}E${(session.episode ?: 0).toString().padStart(2, '0')}"
+    } else null
+
+    Column(modifier = Modifier.width(140.dp)) {
+        Surface(
+            onClick = onJoin,
+            modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).onFocusChanged { focused = it.isFocused },
+            colors = ClickableSurfaceDefaults.colors(containerColor = colors.bg3),
+        ) {
+            Box {
+                AsyncImage(model = thumbPath?.let { apiClient.mediaUrl(it) }, contentDescription = displayTitle, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Box(
+                    modifier = Modifier.align(Alignment.TopStart).padding(6.dp).background(colors.gold.copy(alpha = 0.85f)).padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text("LIVE", color = colors.txtOnGold, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        Text(
+            displayTitle, style = MaterialTheme.typography.bodyMedium,
+            color = if (focused) colors.gold else colors.txt,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp),
+        )
+        epCode?.let { Text(it, color = colors.txt2, style = MaterialTheme.typography.bodySmall) }
+        Text("${session.hostUsername} · ${session.memberCount} watching", color = colors.txt2, style = MaterialTheme.typography.labelSmall)
+        if (canClose) {
+            FocusableTextButton(text = "✕ Close", onClick = onClose, modifier = Modifier.padding(top = 2.dp))
+        }
     }
 }

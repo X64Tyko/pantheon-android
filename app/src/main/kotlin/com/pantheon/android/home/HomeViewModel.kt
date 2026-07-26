@@ -12,6 +12,7 @@ import com.pantheon.android.api.dto.TvDataSource
 import com.pantheon.android.api.dto.TvHeroDataSources
 import com.pantheon.android.api.dto.TvHomeRow
 import com.pantheon.android.api.dto.WatchProgress
+import com.pantheon.android.api.dto.WatchTogetherSession
 import com.pantheon.android.util.toQueryParams
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -37,6 +38,19 @@ class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
         private set
     var continueWatching by mutableStateOf<List<WatchProgress>>(emptyList())
         private set
+    // Every currently-open Watch Together session (any account, not just
+    // this viewer's own) — see kairos's GET /api/watch-together/active and
+    // hades' own WatchTogetherShelf on HomePage.tsx, the same discovery
+    // surface this mirrors.
+    var watchTogether by mutableStateOf<List<WatchTogetherSession>>(emptyList())
+        private set
+
+    // Optimistic local removal after this viewer closes/leaves one from the
+    // shelf — mirrors HomePage.tsx's onCloseWatchTogether, avoiding a full
+    // re-fetch just to drop one row.
+    fun removeWatchTogether(sessionId: String) {
+        watchTogether = watchTogether.filter { it.sessionId != sessionId }
+    }
 
     // Recently-added shows/movies with backdrop art — the same hero
     // candidate pool TvHome.tsx's heroCandidates computes.
@@ -74,6 +88,8 @@ class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
                 continueWatching = if (cwRow != null) {
                     runCatching { apiClient.service.getWatchProgress() }.getOrDefault(emptyList())
                 } else emptyList()
+
+                watchTogether = runCatching { apiClient.service.getActiveWatchTogether() }.getOrDefault(emptyList())
 
                 val shelfRows = rows.filter { it.type == "shelf" && it.id != "continue-watching" }
                 fetchShelfRows(shelfRows)

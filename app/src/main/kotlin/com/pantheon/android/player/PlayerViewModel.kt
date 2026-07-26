@@ -7,15 +7,25 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.google.gson.Gson
 import com.pantheon.android.BuildConfig
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.NextEpisode
 import com.pantheon.android.api.dto.VodStartRequest
 import com.pantheon.android.api.dto.WatchProgressBody
+import com.pantheon.android.api.dto.WatchTogetherCommandBody
+import com.pantheon.android.api.dto.WatchTogetherEvent
+import com.pantheon.android.api.dto.WatchTogetherHeartbeatBody
+import com.pantheon.android.api.dto.WatchTogetherSession
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
+import okhttp3.Response
+import okhttp3.sse.EventSource
+import okhttp3.sse.EventSourceListener
 
 // "android-tv" vs "android-mobile" — this file is shared by both formFactor
 // flavors (see build.gradle.kts's flavorDimensions), so BuildConfig.FLAVOR
@@ -50,6 +60,7 @@ class PlayerViewModel(
     private val kind: String, // "movie" | "episode" | "channel"
     private val contentId: String,
     initialPositionMs: Long,
+    private val wtSessionId: String?,
 ) : ViewModel() {
 
     var loading by mutableStateOf(true)
@@ -82,8 +93,107 @@ class PlayerViewModel(
     private var sessionId: String? = null
     private var generation = 0
 
+    // ── Watch Together ───────────────────────────────────────────────────────
+    // Session identity/host is Kairos-owned (WatchTogetherService.cpp) — this
+    // one round trip decides host vs. follower for everything below, mirroring
+    // PlayerPage.tsx's own getWatchTogether effect. wtActive (not just
+    // wtSessionId != null) gates every WT behavior below so an explicit
+    // "Leave" click can turn all of it off without needing to re-navigate —
+    // see leaveWatchTogether().
+    var wtActive by mutableStateOf(wtSessionId != null)
+        private set
+    var wtSession by mutableStateOf<WatchTogetherSession?>(null)
+        private set
+    val isWtHost: Boolean
+        get() = wtActive && wtSession != null && apiClient.currentUserId != null && apiClient.currentUserId == wtSession?.hostUserId
+    val isWtFollower: Boolean
+        get() = wtActive && wtSession != null && !isWtHost
+
+    // One-shot events off Hermes' SSE stream, for PlayerScreen (which owns
+    // the actual ExoPlayer instance) to apply — a Flow rather than plain
+    // mutableState so two back-to-back events with identical field values
+    // (e.g. two `sync` ticks with the same paused flag) both still reach the
+    // collector instead of one getting deduped away by Compose snapshot
+    // equality.
+    private val _wtEvents = MutableSharedFlow<WatchTogetherEvent>(extraBufferCapacity = 4)
+    val wtEvents: SharedFlow<WatchTogetherEvent> = _wtEvents
+
+    private var wtEventSource: EventSource? = null
+    private val gson = Gson()
+
     init {
         load(initialPositionMs)
+        if (wtSessionId != null) loadWtSession(wtSessionId)
+    }
+
+    private fun loadWtSession(id: String) {
+        viewModelScope.launch {
+            wtSession = runCatching { apiClient.service.getWatchTogether(id) }.getOrNull()
+            if (wtSession != null && !isWtHost) subscribeWtFollower(id)
+        }
+    }
+
+    // EventSourceListener callbacks land on OkHttp's own dispatcher thread,
+    // not the main/viewModelScope one — _wtEvents.tryEmit is safe to call
+    // from any thread (MutableSharedFlow's contract), so no dispatcher hop
+    // is needed just to publish the parsed event.
+    private fun subscribeWtFollower(id: String) {
+        wtEventSource?.cancel()
+        wtEventSource = apiClient.openWatchTogetherStream(id, object : EventSourceListener() {
+            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                runCatching { gson.fromJson(data, WatchTogetherEvent::class.java) }
+                    .getOrNull()?.let { _wtEvents.tryEmit(it) }
+            }
+            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                // okhttp-sse retries on its own (same reconnect-by-default
+                // behavior as a browser's EventSource) — nothing to do here
+                // beyond letting that happen; a dropped tick just means the
+                // next successful one corrects position/paused as normal.
+            }
+        })
+    }
+
+    // Host-only, fire-and-forget — cheap/frequent, updates Hermes'
+    // extrapolation baseline between explicit seek/pause/play commands. See
+    // PlayerScreen's own WT_HEARTBEAT_MS loop, which is what actually calls
+    // this on a timer (this ViewModel doesn't own the player, so it can't
+    // poll position itself).
+    fun sendWtHeartbeat(positionMs: Long, paused: Boolean) {
+        val id = wtSessionId ?: return
+        if (!isWtHost) return
+        viewModelScope.launch {
+            runCatching { apiClient.service.postWatchTogetherHeartbeat(id, WatchTogetherHeartbeatBody(positionMs, paused)) }
+        }
+    }
+
+    // Host-only explicit action — becomes the new authoritative baseline on
+    // Hermes immediately (not just on the next heartbeat tick) and is what
+    // followers apply right away. PlayerScreen calls this from its own
+    // ExoPlayer listeners (play/pause state changes, real seeks).
+    fun sendWtCommand(type: String, positionMs: Long? = null) {
+        val id = wtSessionId ?: return
+        if (!isWtHost) return
+        viewModelScope.launch {
+            runCatching { apiClient.service.postWatchTogetherCommand(id, WatchTogetherCommandBody(type, positionMs)) }
+        }
+    }
+
+    // Explicit "Leave"/"End" control — mirrors PlayerPage.tsx's
+    // handleLeaveWatchTogether: stop participating but stay in the player,
+    // watching solo, rather than navigating away. Best-effort — the same
+    // host-closes/follower-leaves split as the automatic onCleared cleanup
+    // below, just triggered immediately instead of on teardown.
+    fun leaveWatchTogether() {
+        val id = wtSessionId ?: return
+        val wasHost = isWtHost
+        wtActive = false
+        wtEventSource?.cancel()
+        wtEventSource = null
+        viewModelScope.launch {
+            runCatching {
+                if (wasHost) apiClient.service.closeWatchTogether(id) else apiClient.service.leaveWatchTogether(id)
+            }
+        }
     }
 
     private fun load(positionMs: Long) {
@@ -180,13 +290,23 @@ class PlayerViewModel(
     @OptIn(DelicateCoroutinesApi::class)
     override fun onCleared() {
         generation++
+        wtEventSource?.cancel()
+        if (wtActive) {
+            val id = wtSessionId
+            val wasHost = isWtHost
+            if (id != null) {
+                GlobalScope.launch(Dispatchers.IO) { runCatching {
+                    if (wasHost) apiClient.service.closeWatchTogether(id) else apiClient.service.leaveWatchTogether(id)
+                } }
+            }
+        }
         val sid = sessionId ?: return
         GlobalScope.launch(Dispatchers.IO) { runCatching { apiClient.service.stopVodPlayback(sid) } }
     }
 
     companion object {
-        fun factory(apiClient: ApiClient, kind: String, contentId: String, initialPositionMs: Long) = viewModelFactory {
-            initializer { PlayerViewModel(apiClient, kind, contentId, initialPositionMs) }
+        fun factory(apiClient: ApiClient, kind: String, contentId: String, initialPositionMs: Long, wtSessionId: String? = null) = viewModelFactory {
+            initializer { PlayerViewModel(apiClient, kind, contentId, initialPositionMs, wtSessionId) }
         }
     }
 }

@@ -48,11 +48,7 @@ import com.pantheon.android.filter.DECADES
 import com.pantheon.android.filter.RESOLUTIONS
 import com.pantheon.android.filter.SORT_DEFS
 import com.pantheon.android.filter.ValueType
-
-private val BgColor = Color(0xFF1B1C29)
-private val GoldColor = Color(0xFFE0B84E)
-private val TextDim = Color(0xFFB5B5C4)
-private val TileBg = Color(0xFF232438)
+import com.pantheon.android.ui.theme.LocalPantheonColors
 
 // Full-screen rule-builder overlay — mirrors hades/src/components/
 // PickerFilters.tsx's FilterSection (one level of grouping, real per-field
@@ -76,20 +72,21 @@ fun FilterPanel(
     onReroll: () -> Unit,
     onClose: () -> Unit,
 ) {
+    val colors = LocalPantheonColors.current
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(modifier = Modifier.fillMaxSize().background(BgColor)) {
+        Column(modifier = Modifier.fillMaxSize().background(colors.bg)) {
             Row(
                 modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Filters", style = MaterialTheme.typography.headlineSmall, color = Color.White, modifier = Modifier.weight(1f))
-                TextButton(onClick = onClose) { Text("Done", color = GoldColor) }
+                Text("Filters", style = MaterialTheme.typography.headlineSmall, color = colors.txt, modifier = Modifier.weight(1f))
+                TextButton(onClick = onClose) { Text("Done", color = colors.gold) }
             }
 
             LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding()) {
                 if (libraries.isNotEmpty()) {
                     item {
-                        Text("Libraries", color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+                        Text("Libraries", color = colors.txt2, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
                             items(libraries, key = { it.libraryId }) { lib ->
                                 FilterChip(lib.displayName, lib.libraryId in selectedLibraryIds) { onToggleLibrary(lib.libraryId) }
@@ -101,14 +98,14 @@ fun FilterPanel(
                 if (sortOptions.isNotEmpty()) {
                     item {
                         val dirless = SORT_DEFS[sort]?.dirless ?: false
-                        Text("Sort", color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+                        Text("Sort", color = colors.txt2, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
                             items(sortOptions, key = { it }) { s ->
                                 FilterChip(SORT_DEFS[s]?.label ?: s, sort == s) { onSetSort(s) }
                             }
                         }
                         if (dirless) {
-                            TextButton(onClick = onReroll) { Text("🎲 Reroll", color = GoldColor) }
+                            TextButton(onClick = onReroll) { Text("🎲 Reroll", color = colors.gold) }
                         } else {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 FilterChip("ASC", sortDir == "asc") { onSetSortDir(if (sortDir == "asc") "" else "asc") }
@@ -121,9 +118,9 @@ fun FilterPanel(
                 if (availableFields.isNotEmpty()) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)) {
-                            Text("Match", color = TextDim)
+                            Text("Match", color = colors.txt2)
                             MatchDropdown(tree.match, tree::updateMatch, modifier = Modifier.padding(horizontal = 8.dp))
-                            Text("of the following:", color = TextDim)
+                            Text("of the following:", color = colors.txt2)
                         }
                     }
 
@@ -137,13 +134,13 @@ fun FilterPanel(
                                 onRemove = { tree.removeItem(item.id) },
                             )
                             is FilterItem.GroupItem -> Column(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).border(1.dp, TileBg, RoundedCornerShape(8.dp)).padding(10.dp),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).border(1.dp, colors.bg3, RoundedCornerShape(8.dp)).padding(10.dp),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Match", color = TextDim)
+                                    Text("Match", color = colors.txt2)
                                     MatchDropdown(item.group.match, { m -> tree.setGroupMatch(item.id, m) }, modifier = Modifier.padding(horizontal = 8.dp))
-                                    Text("within this group", color = TextDim, modifier = Modifier.weight(1f))
-                                    TextButton(onClick = { tree.removeItem(item.id) }) { Text("✕ remove group", color = TextDim) }
+                                    Text("within this group", color = colors.txt2, modifier = Modifier.weight(1f))
+                                    TextButton(onClick = { tree.removeItem(item.id) }) { Text("✕ remove group", color = colors.txt2) }
                                 }
                                 item.group.rules.forEach { rule ->
                                     FilterRuleRow(
@@ -154,15 +151,15 @@ fun FilterPanel(
                                         onRemove = { tree.removeRuleFromGroup(item.id, rule.id) },
                                     )
                                 }
-                                TextButton(onClick = { tree.addRuleToGroup(item.id) }) { Text("+ Add rule to group", color = GoldColor) }
+                                TextButton(onClick = { tree.addRuleToGroup(item.id) }) { Text("+ Add rule to group", color = colors.gold) }
                             }
                         }
                     }
 
                     item {
                         Row(modifier = Modifier.padding(vertical = 16.dp)) {
-                            TextButton(onClick = { tree.addRule(availableFields.first()) }) { Text("+ Add Rule", color = GoldColor) }
-                            TextButton(onClick = tree::addGroup) { Text("+ Add Group", color = GoldColor) }
+                            TextButton(onClick = { tree.addRule(availableFields.first()) }) { Text("+ Add Rule", color = colors.gold) }
+                            TextButton(onClick = tree::addGroup) { Text("+ Add Group", color = colors.gold) }
                         }
                     }
                 }
@@ -191,6 +188,7 @@ private fun FilterRuleRow(
     onUpdate: (field: String?, op: String?, value: String?) -> Unit,
     onRemove: () -> Unit,
 ) {
+    val colors = LocalPantheonColors.current
     val def = FIELD_DEFS[rule.field]
     var fieldMenuOpen by remember { mutableStateOf(false) }
     var opMenuOpen by remember { mutableStateOf(false) }
@@ -218,7 +216,7 @@ private fun FilterRuleRow(
                     }
                 }
             }
-            TextButton(onClick = onRemove) { Text("✕", color = TextDim) }
+            TextButton(onClick = onRemove) { Text("✕", color = colors.txt2) }
         }
 
         when (def?.valueType) {
@@ -265,14 +263,15 @@ private fun ValuePicker(options: List<String>, value: String, onPick: (String) -
 
 @Composable
 private fun FilterChip(label: String, active: Boolean, onClick: () -> Unit) {
+    val colors = LocalPantheonColors.current
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(if (active) GoldColor else Color.Transparent)
-            .border(1.dp, if (active) GoldColor else TextDim, RoundedCornerShape(14.dp))
+            .background(if (active) colors.gold else Color.Transparent)
+            .border(1.dp, if (active) colors.gold else colors.txt2, RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
-        Text(label, color = if (active) Color.Black else Color.White, style = MaterialTheme.typography.labelMedium)
+        Text(label, color = if (active) colors.txtOnGold else colors.txt, style = MaterialTheme.typography.labelMedium)
     }
 }

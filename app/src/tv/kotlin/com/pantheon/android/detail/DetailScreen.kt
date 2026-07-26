@@ -52,13 +52,9 @@ import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.pantheon.android.api.ApiClient
+import com.pantheon.android.ui.theme.LocalPantheonColors
 import kotlinx.coroutines.launch
 
-private val BgColor = Color(0xFF1B1C29)
-private val GoldColor = Color(0xFFE0B84E)
-private val TextDim = Color(0xFFB5B5C4)
-private val TileBg = Color(0xFF232438)
-private val SlateGray = Color(0xFF4A4E5A)
 private val HERO_HEIGHT = 320.dp
 
 private val BackdropScrimBrush = Brush.verticalGradient(
@@ -89,11 +85,14 @@ fun DetailScreen(
     contentType: String,
     id: String,
     onPlay: (kind: String, id: String, positionMs: Long) -> Unit,
+    onWatchTogether: (kind: String, id: String, positionMs: Long, wtSessionId: String) -> Unit,
     onBack: () -> Unit,
 ) {
     val viewModel: DetailViewModel = viewModel(factory = DetailViewModel.factory(apiClient, contentType, id))
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val colors = LocalPantheonColors.current
+    var watchTogetherLoading by remember { mutableStateOf(false) }
     val playFocusRequester = remember { FocusRequester() }
     var expandedSeasonNumber by remember { mutableStateOf<Int?>(null) }
     var overviewDialogOpen by remember { mutableStateOf(false) }
@@ -114,17 +113,29 @@ fun DetailScreen(
         viewModel.playFromBeginningTarget()?.let { onPlay(it.kind, it.id, it.positionMs) }
     }
 
+    fun goWatchTogether() {
+        watchTogetherLoading = true
+        scope.launch {
+            val result = viewModel.createWatchTogether()
+            watchTogetherLoading = false
+            if (result != null) {
+                val (target, sessionId) = result
+                onWatchTogether(target.kind, target.id, target.positionMs, sessionId)
+            }
+        }
+    }
+
     fun scrollBelowHeader(seasonIndex: Int) {
         scope.launch { listState.animateScrollToItem(seasonIndex + 1, scrollOffset = -headerHeightPx) }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
+    Box(modifier = Modifier.fillMaxSize().background(colors.bg)) {
         if (viewModel.loading) {
-            CircularProgressIndicator(color = GoldColor, modifier = Modifier.align(Alignment.Center))
+            CircularProgressIndicator(color = colors.gold, modifier = Modifier.align(Alignment.Center))
             return@Box
         }
         viewModel.errorMessage?.let { message ->
-            Text(message, color = TextDim, modifier = Modifier.align(Alignment.Center))
+            Text(message, color = colors.txt2, modifier = Modifier.align(Alignment.Center))
             return@Box
         }
 
@@ -161,12 +172,12 @@ fun DetailScreen(
                             )
                             Box(modifier = Modifier.matchParentSize().background(BackdropScrimBrush))
                         } else {
-                            Box(modifier = Modifier.matchParentSize().background(SlateGray))
+                            Box(modifier = Modifier.matchParentSize().background(colors.bg4))
                         }
                     }
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 16.dp)) {
-                            Box(modifier = Modifier.width(160.dp).aspectRatio(2f / 3f).background(TileBg)) {
+                            Box(modifier = Modifier.width(160.dp).aspectRatio(2f / 3f).background(colors.bg3)) {
                                 AsyncImage(
                                     model = viewModel.thumb?.let { apiClient.mediaUrl("/api/${if (contentType == "show") "shows" else "movies"}/$id/thumb") },
                                     contentDescription = viewModel.title,
@@ -178,16 +189,16 @@ fun DetailScreen(
                                 Text(
                                     viewModel.title,
                                     style = MaterialTheme.typography.headlineMedium.copy(shadow = TitleTextShadow),
-                                    color = Color.White,
+                                    color = colors.txt,
                                 )
 
                                 if (viewModel.hasZone("meta-block")) {
                                     Row(modifier = Modifier.padding(top = 6.dp)) {
                                         viewModel.metaFields.forEach { field ->
                                             when (field) {
-                                                "year" -> viewModel.year?.let { Text("$it  ", color = Color.White) }
-                                                "rating" -> viewModel.rating?.let { Text("★ ${"%.1f".format(it)}  ", color = Color.White) }
-                                                "content_type" -> Text(if (contentType == "show") "series  " else "film  ", color = Color.White)
+                                                "year" -> viewModel.year?.let { Text("$it  ", color = colors.txt) }
+                                                "rating" -> viewModel.rating?.let { Text("★ ${"%.1f".format(it)}  ", color = colors.txt) }
+                                                "content_type" -> Text(if (contentType == "show") "series  " else "film  ", color = colors.txt)
                                             }
                                         }
                                     }
@@ -204,6 +215,14 @@ fun DetailScreen(
                                             onClick = ::goPlayFromBeginning,
                                             modifier = Modifier.padding(start = 12.dp),
                                         )
+                                        // Movies and shows only (Kairos's own
+                                        // content_type gate on POST
+                                        // /api/watch-together).
+                                        TvTextButton(
+                                            text = if (watchTogetherLoading) "Starting…" else "Watch Together",
+                                            onClick = ::goWatchTogether,
+                                            modifier = Modifier.padding(start = 12.dp),
+                                        )
                                     }
                                 }
 
@@ -215,7 +234,7 @@ fun DetailScreen(
                                     var overviewOverflowing by remember { mutableStateOf(false) }
                                     Text(
                                         viewModel.overview,
-                                        color = TextDim,
+                                        color = colors.txt2,
                                         maxLines = 3,
                                         overflow = TextOverflow.Ellipsis,
                                         onTextLayout = { result -> overviewOverflowing = result.hasVisualOverflow },
@@ -239,7 +258,7 @@ fun DetailScreen(
                                 modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
                             ) {
                                 items(viewModel.genres, key = { it }) { g ->
-                                    Text(g, color = TextDim, modifier = Modifier.background(TileBg).padding(horizontal = 12.dp, vertical = 6.dp))
+                                    Text(g, color = colors.txt2, modifier = Modifier.background(colors.bg3).padding(horizontal = 12.dp, vertical = 6.dp))
                                 }
                             }
                         }
@@ -293,40 +312,42 @@ fun DetailScreen(
 
 @Composable
 private fun SeasonHeaderTile(title: String, count: Int, expanded: Boolean, onFocusExpand: () -> Unit) {
+    val colors = LocalPantheonColors.current
     var focused by remember { mutableStateOf(false) }
     Surface(
         onClick = onFocusExpand,
         modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocusExpand() },
         colors = ClickableSurfaceDefaults.colors(
             containerColor = Color.Transparent,
-            focusedContainerColor = Color(0xFF2E2F45),
+            focusedContainerColor = colors.bg4,
         ),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, color = if (focused) GoldColor else Color.White, modifier = Modifier.weight(1f))
-            Text("$count episode${if (count == 1) "" else "s"}", color = TextDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(end = 10.dp))
-            Text(if (expanded) "⌄" else "›", color = TextDim, style = MaterialTheme.typography.titleMedium)
+            Text(title, style = MaterialTheme.typography.titleMedium, color = if (focused) colors.gold else colors.txt, modifier = Modifier.weight(1f))
+            Text("$count episode${if (count == 1) "" else "s"}", color = colors.txt2, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(end = 10.dp))
+            Text(if (expanded) "⌄" else "›", color = colors.txt2, style = MaterialTheme.typography.titleMedium)
         }
     }
 }
 
 @Composable
 private fun EpisodeTile(apiClient: ApiClient, episodeId: String, episodeNumber: Int, title: String, onFocus: () -> Unit, onClick: () -> Unit) {
+    val colors = LocalPantheonColors.current
     var focused by remember { mutableStateOf(false) }
     Column(modifier = Modifier.width(220.dp)) {
         Surface(
             onClick = onClick,
             modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() },
-            colors = ClickableSurfaceDefaults.colors(containerColor = TileBg),
+            colors = ClickableSurfaceDefaults.colors(containerColor = colors.bg3),
         ) {
             AsyncImage(model = apiClient.mediaUrl("/api/episodes/$episodeId/thumb"), contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
         Text(
             "E$episodeNumber  $title",
-            color = if (focused) GoldColor else Color.White,
+            color = if (focused) colors.gold else colors.txt,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp),
@@ -336,8 +357,9 @@ private fun EpisodeTile(apiClient: ApiClient, episodeId: String, episodeNumber: 
 
 @Composable
 private fun TvTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalPantheonColors.current
     Surface(onClick = onClick, modifier = modifier, colors = ClickableSurfaceDefaults.colors(containerColor = Color.Black.copy(alpha = 0.4f))) {
-        Text(text, color = Color.White, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+        Text(text, color = colors.txt, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
     }
 }
 
@@ -346,14 +368,15 @@ private fun TvTextButton(text: String, onClick: () -> Unit, modifier: Modifier =
 // itself (see the overview Text's maxLines cap above).
 @Composable
 private fun OverviewDialog(title: String, overview: String, onClose: () -> Unit) {
+    val colors = LocalPantheonColors.current
     val closeFocusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { closeFocusRequester.requestFocus() }
     Dialog(onDismissRequest = onClose) {
         Column(
-            modifier = Modifier.width(680.dp).background(BgColor, RoundedCornerShape(12.dp)).padding(32.dp),
+            modifier = Modifier.width(680.dp).background(colors.bg, RoundedCornerShape(12.dp)).padding(32.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.headlineSmall, color = Color.White)
-            Text(overview, color = TextDim, modifier = Modifier.padding(top = 16.dp))
+            Text(title, style = MaterialTheme.typography.headlineSmall, color = colors.txt)
+            Text(overview, color = colors.txt2, modifier = Modifier.padding(top = 16.dp))
             TvTextButton(
                 text = "Close",
                 onClick = onClose,

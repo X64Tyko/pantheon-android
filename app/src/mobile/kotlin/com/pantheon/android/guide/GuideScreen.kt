@@ -54,19 +54,7 @@ import coil3.compose.AsyncImage
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.Channel
 import com.pantheon.android.api.dto.EpgProgram
-
-private val BgColor = Color(0xFF1B1C29)
-private val GoldColor = Color(0xFFE0B84E)
-private val TextDim = Color(0xFFB5B5C4)
-private val TileBg = Color(0xFF232438)
-private val TileBgLight = Color(0xFF2B2C42)
-private val LineColor = Color(0xFF34343F)
-private val VioletColor = Color(0xFF9991EB)
-
-// Same NOW_DARK/NOW_LIGHT oklch→sRGB conversion as the tv flavor's own
-// GuideScreen.kt — see that file's comment.
-private val NowDark = Color(0xFF352661)
-private val NowLight = Color(0xFF786DBD)
+import com.pantheon.android.ui.theme.LocalPantheonColors
 
 private val COLUMN_WIDTH = 180.dp
 private val HEADER_HEIGHT = 72.dp
@@ -89,8 +77,9 @@ fun GuideScreen(
     onNavigateLibrary: () -> Unit,
 ) {
     val viewModel: GuideViewModel = viewModel(factory = GuideViewModel.factory(apiClient))
+    val colors = LocalPantheonColors.current
 
-    Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
+    Surface(modifier = Modifier.fillMaxSize(), color = colors.bg) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Same quick-action row style as Home's own (Library/Guide) —
             // Guide is only ever reached from Home today, so this doubles as
@@ -108,9 +97,9 @@ fun GuideScreen(
             }
 
             if (viewModel.loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = GoldColor) }
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = colors.gold) }
             } else if (viewModel.errorMessage != null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(viewModel.errorMessage!!, color = TextDim) }
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(viewModel.errorMessage!!, color = colors.txt2) }
             } else if (viewModel.hasZone("time-grid") || viewModel.hasZone("channel-header")) {
                 GuideGridSection(apiClient, viewModel, onWatch = onWatchChannel, modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp))
             }
@@ -120,6 +109,7 @@ fun GuideScreen(
 
 @Composable
 private fun GuidePreviewCard(viewModel: GuideViewModel, onWatch: (String) -> Unit) {
+    val colors = LocalPantheonColors.current
     // Touch has no default D-pad-landed focus to fall back on — select the
     // first channel once the list loads so the preview card always has
     // something to show, the touch equivalent of TV's default initial-focus
@@ -141,16 +131,16 @@ private fun GuidePreviewCard(viewModel: GuideViewModel, onWatch: (String) -> Uni
         if (channel != null) {
             Column(modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Ch ${channel.number} · ${channel.name}", color = TextDim, style = MaterialTheme.typography.labelMedium)
+                    Text("Ch ${channel.number} · ${channel.name}", color = colors.txt2, style = MaterialTheme.typography.labelMedium)
                     channel.contentTag?.takeIf { it.isNotBlank() }?.let { tag ->
                         Text(
-                            tag, color = Color.White,
-                            modifier = Modifier.padding(start = 8.dp).background(TileBg, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
+                            tag, color = colors.txt,
+                            modifier = Modifier.padding(start = 8.dp).background(colors.bg3, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
                         )
                     }
                 }
                 val title = if (program?.itemType == "episode") program.showTitle ?: program.title else program?.title ?: "No program info"
-                Text(title, style = MaterialTheme.typography.titleMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+                Text(title, style = MaterialTheme.typography.titleMedium, color = colors.txt, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
 
                 val epLabel = if (program?.itemType == "episode" && program.season != null && program.episodeNum != null) {
                     "S${program.season.toString().padStart(2, '0')}E${program.episodeNum.toString().padStart(2, '0')}"
@@ -159,12 +149,12 @@ private fun GuidePreviewCard(viewModel: GuideViewModel, onWatch: (String) -> Uni
                 val startsInMs = if (program != null && !isLive && program.wallClockStartMs > viewModel.nowMs) program.wallClockStartMs - viewModel.nowMs else null
                 if (epLabel != null || startsInMs != null) {
                     Row(modifier = Modifier.padding(top = 2.dp)) {
-                        epLabel?.let { Text(it, color = TextDim, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 10.dp)) }
-                        startsInMs?.let { Text("Starts in ${formatCountdown(it)}", color = GoldColor, style = MaterialTheme.typography.labelSmall) }
+                        epLabel?.let { Text(it, color = colors.txt2, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 10.dp)) }
+                        startsInMs?.let { Text("Starts in ${formatCountdown(it)}", color = colors.gold, style = MaterialTheme.typography.labelSmall) }
                     }
                 }
                 TextButton(onClick = { onWatch(channel.channelId) }, modifier = Modifier.padding(top = 4.dp)) {
-                    Text("▶  Watch", color = GoldColor)
+                    Text("▶  Watch", color = colors.gold)
                 }
             }
         }
@@ -181,6 +171,7 @@ private fun formatCountdown(ms: Long): String {
 
 @Composable
 private fun GuideGridSection(apiClient: ApiClient, viewModel: GuideViewModel, onWatch: (String) -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalPantheonColors.current
     val horizontalScroll = rememberScrollState()
     val verticalScroll = rememberScrollState()
     val density = LocalDensity.current
@@ -194,7 +185,7 @@ private fun GuideGridSection(apiClient: ApiClient, viewModel: GuideViewModel, on
         verticalScroll.scrollTo((nowOffsetPx - paddingPx).toInt().coerceAtLeast(0))
     }
 
-    Column(modifier = modifier.border(1.dp, LineColor, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
+    Column(modifier = modifier.border(1.dp, colors.glassBorder, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
         Row(modifier = Modifier.horizontalScroll(horizontalScroll)) {
             viewModel.channels.forEach { ch ->
                 ChannelHeaderCell(
@@ -218,7 +209,7 @@ private fun GuideGridSection(apiClient: ApiClient, viewModel: GuideViewModel, on
                         var y = phasePx
                         val strokePx = 1.dp.toPx()
                         while (y < size.height) {
-                            if (y >= 0) drawLine(LineColor, Offset(0f, y), Offset(size.width, y), strokeWidth = strokePx)
+                            if (y >= 0) drawLine(colors.glassBorder, Offset(0f, y), Offset(size.width, y), strokeWidth = strokePx)
                             y += lineSpacingPx
                         }
                     },
@@ -238,14 +229,15 @@ private fun GuideGridSection(apiClient: ApiClient, viewModel: GuideViewModel, on
 
 @Composable
 private fun ChannelHeaderCell(apiClient: ApiClient, channel: Channel, focused: Boolean, onClick: () -> Unit) {
+    val colors = LocalPantheonColors.current
     Box(
         modifier = Modifier.width(COLUMN_WIDTH).height(HEADER_HEIGHT)
-            .background(if (focused) TileBgLight else TileBg)
+            .background(if (focused) colors.bg4 else colors.bg3)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(channel.number.toString(), color = if (focused) GoldColor else TextDim, style = MaterialTheme.typography.titleSmall)
+            Text(channel.number.toString(), color = if (focused) colors.gold else colors.txt2, style = MaterialTheme.typography.titleSmall)
             if (channel.logoPath != null) {
                 AsyncImage(
                     model = apiClient.mediaUrl("/api/channels/${channel.channelId}/logo"),
@@ -253,7 +245,7 @@ private fun ChannelHeaderCell(apiClient: ApiClient, channel: Channel, focused: B
                     modifier = Modifier.height(18.dp).padding(top = 4.dp),
                 )
             } else {
-                Text(channel.name, color = TextDim, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp).widthIn(max = COLUMN_WIDTH - 12.dp))
+                Text(channel.name, color = colors.txt2, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp).widthIn(max = COLUMN_WIDTH - 12.dp))
             }
         }
     }
@@ -270,6 +262,7 @@ private fun ChannelColumnCell(programs: List<EpgProgram>, windowStartMs: Long, n
 
 @Composable
 private fun ProgramBlockCell(program: EpgProgram, windowStartMs: Long, nowMs: Long, onClick: () -> Unit) {
+    val colors = LocalPantheonColors.current
     val topMin = (program.wallClockStartMs - windowStartMs) / 60_000f
     val heightMin = (program.wallClockEndMs - program.wallClockStartMs) / 60_000f
     val topDp = (topMin * PX_PER_MIN).dp
@@ -287,9 +280,9 @@ private fun ProgramBlockCell(program: EpgProgram, windowStartMs: Long, nowMs: Lo
     } else program.title
 
     val background = when {
-        isNow -> Brush.verticalGradient(0f to NowDark, nowFraction to NowDark, nowFraction to NowLight, 1f to NowLight)
-        isPast -> Brush.verticalGradient(listOf(TileBg.copy(alpha = 0.55f), TileBg.copy(alpha = 0.55f)))
-        else -> Brush.verticalGradient(listOf(TileBgLight, TileBgLight))
+        isNow -> Brush.verticalGradient(0f to colors.violetDeep, nowFraction to colors.violetDeep, nowFraction to colors.violet, 1f to colors.violet)
+        isPast -> Brush.verticalGradient(listOf(colors.bg3.copy(alpha = 0.55f), colors.bg3.copy(alpha = 0.55f)))
+        else -> Brush.verticalGradient(listOf(colors.bg4, colors.bg4))
     }
 
     BoxWithConstraints(
@@ -299,7 +292,7 @@ private fun ProgramBlockCell(program: EpgProgram, windowStartMs: Long, nowMs: Lo
             .height((heightDp - 2.dp).coerceAtLeast(16.dp))
             .clip(RoundedCornerShape(4.dp))
             .background(background)
-            .border(1.dp, if (isNow) VioletColor else LineColor, RoundedCornerShape(4.dp))
+            .border(1.dp, if (isNow) colors.violet else colors.glassBorder, RoundedCornerShape(4.dp))
             .clickable(onClick = onClick),
     ) {
         if (isNow) {
@@ -307,7 +300,7 @@ private fun ProgramBlockCell(program: EpgProgram, windowStartMs: Long, nowMs: Lo
         }
         Text(
             label,
-            color = if (isNow) Color.White else TextDim,
+            color = if (isNow) colors.txt else colors.txt2,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -320,6 +313,7 @@ private fun ProgramBlockCell(program: EpgProgram, windowStartMs: Long, nowMs: Lo
 // the tv flavor's own GuideScreen.kt for the shared design/comment.
 @Composable
 private fun NowPulseLine(topOffset: Dp) {
+    val colors = LocalPantheonColors.current
     val transition = rememberInfiniteTransition(label = "nowPulse")
     val alpha by transition.animateFloat(
         initialValue = 0.65f,
@@ -332,6 +326,6 @@ private fun NowPulseLine(topOffset: Dp) {
             .fillMaxWidth()
             .height(2.dp)
             .offset(y = topOffset - 1.dp)
-            .background(VioletColor.copy(alpha = alpha)),
+            .background(colors.violet.copy(alpha = alpha)),
     )
 }

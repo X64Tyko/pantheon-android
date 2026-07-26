@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.pantheon.android.api.ApiClient
+import com.pantheon.android.api.CreateWatchTogetherBody
 import com.pantheon.android.api.dto.Episode
 import com.pantheon.android.api.dto.MediaLanguages
 import com.pantheon.android.api.dto.MovieDetail
@@ -113,6 +114,20 @@ class DetailViewModel(private val apiClient: ApiClient, private val contentType:
         if (contentType == "movie") return ResolvedPlayTarget(kind = "movie", id = id, positionMs = 0)
         val first = seasons.firstOrNull()?.episodes?.firstOrNull() ?: return null
         return ResolvedPlayTarget(kind = "episode", id = first.episodeId, positionMs = 0)
+    }
+
+    // Host-initiated — creates a Kairos Watch Together session for whatever
+    // resolvePlayTarget() would resolve to (a show's actual next-episode-to-
+    // play, same target Play itself uses), mirrors LibraryDetailActions.tsx's
+    // WatchTogetherAction. Null on any failure (no resolvable target, or the
+    // create call itself failing) — same best-effort-leaves-button-clickable-
+    // again spirit as web's own handleClick.
+    suspend fun createWatchTogether(): Pair<ResolvedPlayTarget, String>? {
+        val target = resolvePlayTarget() ?: return null
+        val session = runCatching {
+            apiClient.service.createWatchTogether(CreateWatchTogetherBody(target.kind, target.id))
+        }.getOrNull() ?: return null
+        return target to session.sessionId
     }
 
     companion object {

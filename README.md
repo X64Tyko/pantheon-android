@@ -39,7 +39,8 @@ Home, Library, Detail, Guide (a full channel × time EPG grid, not just a channe
 and manifest-driven — the same `GET /api/tv/manifest` contract the web app's own `/tv` surface consumes, so shelf
 layout and theming changes on the server show up here too without an app update.
 
-Watch Together (synchronized group VOD viewing) is web-only for now — it hasn't been ported to this client yet.
+Watch Together (synchronized group VOD viewing) is supported here too — host from a movie/show's Detail screen, or
+join an open session from Home's own Watch Together shelf.
 
 ## Building it yourself
 

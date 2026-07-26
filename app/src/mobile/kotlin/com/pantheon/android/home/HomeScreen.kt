@@ -45,11 +45,9 @@ import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.TvHomeRow
 import com.pantheon.android.api.dto.TvItemAction
 import com.pantheon.android.api.dto.WatchProgress
+import com.pantheon.android.api.dto.WatchTogetherSession
+import com.pantheon.android.ui.theme.LocalPantheonColors
 import kotlinx.coroutines.launch
-
-private val BgColor = Color(0xFF1B1C29)
-private val GoldColor = Color(0xFFE0B84E)
-private val TextDim = Color(0xFFB5B5C4)
 
 // Manifest-driven Home — the mobile-flavor rendering of the same GET
 // /api/tv/manifest response hades/src/tv/TvHome.tsx consumes. Rows/zones
@@ -60,12 +58,35 @@ fun HomeScreen(
     apiClient: ApiClient,
     onOpenDetail: (contentType: String, id: String) -> Unit,
     onPlay: (kind: String, id: String, positionMs: Long) -> Unit,
+    onWatchTogether: (kind: String, id: String, positionMs: Long, wtSessionId: String) -> Unit,
     onNavigateLibrary: () -> Unit,
     onNavigateGuide: () -> Unit,
     onSwitchProfile: () -> Unit,
 ) {
     val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(apiClient))
+    val colors = LocalPantheonColors.current
     val scope = rememberCoroutineScope()
+
+    // join() returns the host's current position along with the usual
+    // membership write, so the new VOD session can start there instead of
+    // at 0 and relying on a later sync correction — mirrors
+    // HomePage.tsx's WatchTogetherCard.go().
+    fun joinWatchTogether(session: WatchTogetherSession) {
+        scope.launch {
+            val joined = runCatching { apiClient.service.joinWatchTogether(session.sessionId) }.getOrNull() ?: return@launch
+            onWatchTogether(session.contentType, session.contentId, joined.positionMs, session.sessionId)
+        }
+    }
+
+    fun closeWatchTogether(session: WatchTogetherSession) {
+        val isHost = apiClient.currentUserId == session.hostUserId
+        scope.launch {
+            runCatching {
+                if (isHost) apiClient.service.closeWatchTogether(session.sessionId) else apiClient.service.leaveWatchTogether(session.sessionId)
+            }
+            viewModel.removeWatchTogether(session.sessionId)
+        }
+    }
 
     // "Play" from any shelf resumes real progress, not just the dedicated
     // Continue Watching row — every content_type now has a server-side
@@ -107,16 +128,16 @@ fun HomeScreen(
         resolveAndPlay(item.contentType, item.id)
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
+    Surface(modifier = Modifier.fillMaxSize(), color = colors.bg) {
         if (viewModel.loading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = GoldColor)
+                CircularProgressIndicator(color = colors.gold)
             }
             return@Surface
         }
         viewModel.errorMessage?.let { message ->
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(message, color = TextDim)
+                Text(message, color = colors.txt2)
             }
             return@Surface
         }
@@ -156,6 +177,16 @@ fun HomeScreen(
                     OutlinedButton(onClick = onSwitchProfile) { Text("👤") }
                 }
             }
+            if (viewModel.watchTogether.isNotEmpty()) {
+                item {
+                    WatchTogetherZone(
+                        apiClient = apiClient,
+                        items = viewModel.watchTogether,
+                        onJoin = ::joinWatchTogether,
+                        onClose = ::closeWatchTogether,
+                    )
+                }
+            }
             items(viewModel.rows.filter { it.type != "hero" && it.type != "guide" }, key = { it.id }) { row ->
                 when {
                     row.id == "continue-watching" -> {
@@ -193,12 +224,13 @@ private fun HeroZone(
     onPlay: (HomeMediaItem) -> Unit,
     onViewDetail: (HomeMediaItem) -> Unit,
 ) {
+    val colors = LocalPantheonColors.current
     val item = viewModel.heroItem ?: return
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(320.dp)
-            .background(Color(0xFF1F2033)),
+            .background(colors.bg2),
     ) {
         AsyncImage(
             model = item.artUrl(apiClient),
@@ -214,7 +246,7 @@ private fun HeroZone(
             Text(
                 item.title,
                 style = MaterialTheme.typography.headlineMedium,
-                color = Color.White,
+                color = colors.txt,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -245,6 +277,7 @@ private fun ShelfZone(
     onItemDetails: (HomeMediaItem) -> Unit,
     onEndTileClick: (() -> Unit)?,
 ) {
+    val colors = LocalPantheonColors.current
     // Scoped per shelf, not globally — selecting a tile in one row doesn't
     // affect any other row's own selection.
     var selectedId by remember { mutableStateOf<String?>(null) }
@@ -253,7 +286,7 @@ private fun ShelfZone(
         Text(
             title,
             style = MaterialTheme.typography.titleMedium,
-            color = Color.White,
+            color = colors.txt,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
         )
         LazyRow(
@@ -284,13 +317,14 @@ private fun ShelfZone(
 
 @Composable
 private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, selected: Boolean, onTap: () -> Unit, onPlay: () -> Unit, onDetails: () -> Unit) {
+    val colors = LocalPantheonColors.current
     Column(modifier = Modifier.width(120.dp)) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(6.dp))
-                .background(Color(0xFF232438))
+                .background(colors.bg3)
                 .clickable(onClick = onTap),
         ) {
             AsyncImage(
@@ -302,32 +336,33 @@ private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, selected: Boole
             if (selected) {
                 Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
                 Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onPlay), color = GoldColor) {
-                        Text("▶", color = Color.Black, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+                    Surface(modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onPlay), color = colors.gold) {
+                        Text("▶", color = colors.txtOnGold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
                     }
-                    TextButton(onClick = onDetails) { Text("Details", color = Color.White) }
+                    TextButton(onClick = onDetails) { Text("Details", color = colors.txt) }
                 }
             }
         }
         Text(
             item.title,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color.White,
+            color = colors.txt,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp),
         )
-        item.year?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall, color = TextDim) }
+        item.year?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall, color = colors.txt2) }
     }
 }
 
 @Composable
 private fun ContinueWatchingZone(apiClient: ApiClient, items: List<WatchProgress>, onClick: (WatchProgress) -> Unit) {
+    val colors = LocalPantheonColors.current
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         Text(
             "Continue Watching",
             style = MaterialTheme.typography.titleMedium,
-            color = Color.White,
+            color = colors.txt,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
         )
         LazyRow(
@@ -340,7 +375,7 @@ private fun ContinueWatchingZone(apiClient: ApiClient, items: List<WatchProgress
                 val path = if (cw.contentType == "movie") "/api/movies/${cw.contentId}/thumb"
                            else cw.showId?.let { "/api/shows/$it/thumb" }
                 Column(modifier = Modifier.width(120.dp).clickable { onClick(cw) }) {
-                    Box(modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).background(Color(0xFF232438))) {
+                    Box(modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).background(colors.bg3)) {
                         AsyncImage(
                             model = path?.let { apiClient.mediaUrl(it) },
                             contentDescription = title,
@@ -354,10 +389,10 @@ private fun ContinueWatchingZone(apiClient: ApiClient, items: List<WatchProgress
                                 .height(3.dp)
                                 .background(Color.Black.copy(alpha = 0.5f)),
                         ) {
-                            Box(modifier = Modifier.fillMaxWidth(progress).height(3.dp).background(GoldColor))
+                            Box(modifier = Modifier.fillMaxWidth(progress).height(3.dp).background(colors.gold))
                         }
                     }
-                    Text(title, style = MaterialTheme.typography.bodyMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                    Text(title, style = MaterialTheme.typography.bodyMedium, color = colors.txt, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
                 }
             }
         }
@@ -366,15 +401,86 @@ private fun ContinueWatchingZone(apiClient: ApiClient, items: List<WatchProgress
 
 @Composable
 private fun EndTile(onClick: () -> Unit) {
+    val colors = LocalPantheonColors.current
     Box(
         modifier = Modifier
             .width(120.dp)
             .aspectRatio(2f / 3f)
-            .background(Color(0xFF232438))
+            .background(colors.bg3)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text("Continue in\nLibrary", color = TextDim, style = MaterialTheme.typography.labelMedium)
+        Text("Continue in\nLibrary", color = colors.txt2, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+// Every currently-open Watch Together session, any account — mirrors
+// HomePage.tsx's WatchTogetherShelf. Tapping a card joins it directly
+// (touch has no separate hover-to-preview state to reveal a Join button
+// first, same "tap the tile" model ContinueWatchingZone already uses).
+@Composable
+private fun WatchTogetherZone(
+    apiClient: ApiClient,
+    items: List<WatchTogetherSession>,
+    onJoin: (WatchTogetherSession) -> Unit,
+    onClose: (WatchTogetherSession) -> Unit,
+) {
+    val colors = LocalPantheonColors.current
+    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+        Text(
+            "Watch Together",
+            style = MaterialTheme.typography.titleMedium,
+            color = colors.txt,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+        )
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
+        ) {
+            items(items, key = { it.sessionId }) { session ->
+                WatchTogetherCard(apiClient, session, onJoin = { onJoin(session) }, onClose = { onClose(session) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun WatchTogetherCard(apiClient: ApiClient, session: WatchTogetherSession, onJoin: () -> Unit, onClose: () -> Unit) {
+    val colors = LocalPantheonColors.current
+    // Host (or anyone, admin-role check not available client-side without
+    // extra plumbing — see the sweep's own note) may close their own
+    // session directly from the shelf without joining it first.
+    val canClose = apiClient.currentUserId == session.hostUserId
+    val thumbPath = if (session.contentType == "movie") "/api/movies/${session.contentId}/thumb"
+                    else session.showId?.let { "/api/shows/$it/thumb" }
+    val displayTitle = if (session.contentType == "episode") session.showTitle ?: session.title else session.title
+    val epCode = if (session.contentType == "episode") {
+        "S${(session.season ?: 0).toString().padStart(2, '0')}E${(session.episode ?: 0).toString().padStart(2, '0')}"
+    } else null
+
+    Column(modifier = Modifier.width(140.dp).clickable(onClick = onJoin)) {
+        Box(modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(6.dp)).background(colors.bg3)) {
+            AsyncImage(
+                model = thumbPath?.let { apiClient.mediaUrl(it) },
+                contentDescription = displayTitle,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                modifier = Modifier.align(Alignment.TopStart).padding(6.dp).clip(RoundedCornerShape(4.dp))
+                    .background(colors.gold.copy(alpha = 0.85f)).padding(horizontal = 6.dp, vertical = 2.dp),
+            ) {
+                Text("LIVE", color = colors.txtOnGold, style = MaterialTheme.typography.labelSmall)
+            }
+            if (canClose) {
+                TextButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd)) {
+                    Text("✕", color = colors.txt)
+                }
+            }
+        }
+        Text(displayTitle, style = MaterialTheme.typography.bodyMedium, color = colors.txt, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+        epCode?.let { Text(it, color = colors.txt2, style = MaterialTheme.typography.bodySmall) }
+        Text("${session.hostUsername} · ${session.memberCount} watching", color = colors.txt2, style = MaterialTheme.typography.labelSmall)
     }
 }
 

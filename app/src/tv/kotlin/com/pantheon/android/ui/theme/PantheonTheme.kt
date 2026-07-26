@@ -1,12 +1,12 @@
 package com.pantheon.android.ui.theme
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.Color
 import androidx.tv.material3.darkColorScheme
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.TvTheme
@@ -34,13 +34,14 @@ fun PantheonTheme(apiClient: ApiClient, content: @Composable () -> Unit) {
         theme = runCatching { apiClient.service.getTvManifest().theme }.getOrNull()
     }
 
-    val background = theme.color("hds-bg", Color(0xFF1B1C29))
-    val surface = theme.color("hds-bg-2", Color(0xFF1B1C29))
-    val primary = theme.color("hds-gold", Color(0xFFE0B84E))
-    val onPrimary = theme.color("hds-txt-on-gold", Color(0xFF201A08))
-    val secondary = theme.color("hds-violet", Color(0xFF8A7FD1))
-    val onSurfaceText = theme.color("hds-txt", Color(0xFFEEEEF2))
-    val errorColor = theme.color("hds-match-red", Color(0xFFCF6679))
+    val pantheonColors = pantheonColorsFromTheme(theme)
+    val background = pantheonColors.bg
+    val surface = pantheonColors.bg2
+    val primary = pantheonColors.gold
+    val onPrimary = pantheonColors.txtOnGold
+    val secondary = pantheonColors.violet
+    val onSurfaceText = pantheonColors.txt
+    val errorColor = pantheonColors.matchRed
 
     val tvColors = darkColorScheme(
         background = background,
@@ -63,7 +64,9 @@ fun PantheonTheme(apiClient: ApiClient, content: @Composable () -> Unit) {
         error = errorColor,
     )
 
-    androidx.compose.material3.MaterialTheme(colorScheme = material3Colors) {
-        androidx.tv.material3.MaterialTheme(colorScheme = tvColors, content = content)
+    CompositionLocalProvider(LocalPantheonColors provides pantheonColors) {
+        androidx.compose.material3.MaterialTheme(colorScheme = material3Colors) {
+            androidx.tv.material3.MaterialTheme(colorScheme = tvColors, content = content)
+        }
     }
 }

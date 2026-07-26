@@ -42,11 +42,7 @@ import coil3.compose.AsyncImage
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.home.HomeMediaItem
 import com.pantheon.android.home.thumbUrl
-
-private val BgColor = Color(0xFF1B1C29)
-private val GoldColor = Color(0xFFE0B84E)
-private val TextDim = Color(0xFFB5B5C4)
-private val TileBg = Color(0xFF232438)
+import com.pantheon.android.ui.theme.LocalPantheonColors
 
 // Mobile counterpart of hades/src/tv/TvLibrary.tsx — search bar +
 // LibraryViewModel shared with the TV flavor, plus a real "Filters" button
@@ -65,6 +61,7 @@ fun LibraryScreen(
     onBack: () -> Unit,
 ) {
     val viewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(apiClient))
+    val colors = LocalPantheonColors.current
     val gridState = rememberLazyGridState()
     var filtersOpen by remember { mutableStateOf(false) }
 
@@ -96,24 +93,24 @@ fun LibraryScreen(
         )
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
+    Surface(modifier = Modifier.fillMaxSize(), color = colors.bg) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onBack) { Text("← Back", color = Color.White) }
+                TextButton(onClick = onBack) { Text("← Back", color = colors.txt) }
                 Text(
                     "Library",
                     style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White,
+                    color = colors.txt,
                     modifier = Modifier.padding(start = 8.dp).weight(1f),
                 )
                 if (viewModel.filterFields.isNotEmpty() || viewModel.libraries.isNotEmpty() || viewModel.sortOptions.isNotEmpty()) {
                     TextButton(onClick = { filtersOpen = true }) {
                         Text(
                             if (activeFilterCount > 0) "Filters ($activeFilterCount)" else "Filters",
-                            color = if (activeFilterCount > 0) GoldColor else Color.White,
+                            color = if (activeFilterCount > 0) colors.gold else colors.txt,
                         )
                     }
                 }
@@ -131,7 +128,7 @@ fun LibraryScreen(
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp).navigationBarsPadding()) {
                 if (viewModel.loading) {
-                    CircularProgressIndicator(color = GoldColor, modifier = Modifier.align(Alignment.Center))
+                    CircularProgressIndicator(color = colors.gold, modifier = Modifier.align(Alignment.Center))
                 } else {
                     val items: List<HomeMediaItem> = viewModel.shows.map { HomeMediaItem.ShowItem(it) } +
                         viewModel.movies.map { HomeMediaItem.MovieItem(it) }
@@ -159,7 +156,7 @@ fun LibraryScreen(
                             // 3-column grid).
                             item(key = "loading-more", span = { GridItemSpan(maxLineSpan) }) {
                                 Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(color = GoldColor)
+                                    CircularProgressIndicator(color = colors.gold)
                                 }
                             }
                         }
@@ -172,8 +169,9 @@ fun LibraryScreen(
 
 @Composable
 private fun LibraryTile(apiClient: ApiClient, item: HomeMediaItem, onClick: () -> Unit) {
+    val colors = LocalPantheonColors.current
     Column(modifier = Modifier.clickable(onClick = onClick)) {
-        Box(modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).background(TileBg)) {
+        Box(modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).background(colors.bg3)) {
             AsyncImage(
                 model = item.thumbUrl(apiClient),
                 contentDescription = item.title,
@@ -181,7 +179,7 @@ private fun LibraryTile(apiClient: ApiClient, item: HomeMediaItem, onClick: () -
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        Text(item.title, style = MaterialTheme.typography.bodyMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
-        item.year?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall, color = TextDim) }
+        Text(item.title, style = MaterialTheme.typography.bodyMedium, color = colors.txt, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+        item.year?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall, color = colors.txt2) }
     }
 }

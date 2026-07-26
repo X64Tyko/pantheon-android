@@ -27,6 +27,11 @@ import com.pantheon.android.api.dto.VodStartRequest
 import com.pantheon.android.api.dto.VodStartResponse
 import com.pantheon.android.api.dto.WatchProgress
 import com.pantheon.android.api.dto.WatchProgressBody
+import com.pantheon.android.api.dto.WatchTogetherCommandBody
+import com.pantheon.android.api.dto.WatchTogetherHeartbeatBody
+import com.pantheon.android.api.dto.WatchTogetherJoinResult
+import com.pantheon.android.api.dto.WatchTogetherOk
+import com.pantheon.android.api.dto.WatchTogetherSession
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -46,6 +51,7 @@ import retrofit2.http.QueryMap
 
 data class LoginRequest(val username: String, val password: String)
 data class SwitchProfileRequest(val pin: String? = null)
+data class CreateWatchTogetherBody(val content_type: String, val content_id: String)
 
 interface KairosApi {
     @POST("api/auth/login")
@@ -156,4 +162,40 @@ interface KairosApi {
 
     @PUT("api/watch-progress/{contentType}/{id}")
     suspend fun putWatchProgress(@Path("contentType") contentType: String, @Path("id") id: String, @Body body: WatchProgressBody): Response<Unit>
+
+    // ── Watch Together ──────────────────────────────────────────────────────
+    // Identity/discovery half — Kairos-owned, see WatchTogetherService.cpp.
+    // Live playback coordination (position/paused, who's host) is a separate
+    // set of routes below, hitting Hermes directly at the bare "watch-together/"
+    // path (no "api/" prefix) — same split hades/src/player/watchTogetherApi.ts's
+    // own header comment documents, and the same base URL works for both since
+    // this app's "server URL" is Hermes, which proxies /api/* to Kairos.
+    @POST("api/watch-together")
+    suspend fun createWatchTogether(@Body body: CreateWatchTogetherBody): WatchTogetherSession
+
+    @GET("api/watch-together/active")
+    suspend fun getActiveWatchTogether(): List<WatchTogetherSession>
+
+    @GET("api/watch-together/{id}")
+    suspend fun getWatchTogether(@Path("id") sessionId: String): WatchTogetherSession
+
+    @POST("api/watch-together/{id}/leave")
+    suspend fun leaveWatchTogether(@Path("id") sessionId: String): WatchTogetherOk
+
+    @POST("api/watch-together/{id}/close")
+    suspend fun closeWatchTogether(@Path("id") sessionId: String): WatchTogetherOk
+
+    // Hermes — upsert membership + the live position/paused Kairos never
+    // tracks, so a joining client can seed ExoPlayer's start position.
+    @POST("watch-together/{id}/join")
+    suspend fun joinWatchTogether(@Path("id") sessionId: String): WatchTogetherJoinResult
+
+    // Hermes, host-only (403 otherwise) — {"type": "seek"|"pause"|"play", "position_ms"?}.
+    @POST("watch-together/{id}/command")
+    suspend fun postWatchTogetherCommand(@Path("id") sessionId: String, @Body body: WatchTogetherCommandBody): WatchTogetherOk
+
+    // Hermes, host-only, cheap/frequent — updates the extrapolation baseline
+    // between explicit commands.
+    @POST("watch-together/{id}/heartbeat")
+    suspend fun postWatchTogetherHeartbeat(@Path("id") sessionId: String, @Body body: WatchTogetherHeartbeatBody): WatchTogetherOk
 }

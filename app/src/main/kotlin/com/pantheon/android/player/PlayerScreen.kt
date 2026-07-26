@@ -59,15 +59,23 @@ import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.NextEpisode
+import com.pantheon.android.ui.theme.LocalPantheonColors
 import kotlinx.coroutines.delay
 
-private val GoldColor = Color(0xFFE0B84E)
-private val TextDim = Color(0xFFB5B5C4)
-private val TileBg = Color(0xFF232438)
 private const val PROGRESS_PING_MS = 15_000L
 private const val POSITION_POLL_MS = 500L
 private const val UP_NEXT_COUNTDOWN_SECS = 10
 private const val UP_NEXT_FALLBACK_WINDOW_MS = 30_000L
+// Watch Together: host heartbeat cadence — matches Hermes' own `sync` tick
+// interval (WatchTogetherManager::tickSync, main.cpp), so a follower's
+// authoritative position is never more than one tick stale.
+private const val WT_HEARTBEAT_MS = 4_000L
+// Watch Together: how far a follower's local position must drift from a
+// periodic `sync` tick's authoritative one before snapping to it — small
+// clock/decode jitter shouldn't cause constant micro-seeking, but a stalled
+// rebuffer or a fresh join should correct promptly. Mirrors PlayerPage.tsx's
+// identical constant.
+private const val WT_SYNC_DRIFT_THRESHOLD_MS = 1_500L
 
 // Shared by both flavors, unlike Home/Library/Detail — media3-ui's
 // PlayerView is a classic Android View with its own built-in D-pad-navigable
@@ -90,9 +98,11 @@ fun PlayerScreen(
     initialPositionMs: Long,
     onBack: () -> Unit,
     onAdvanceToNext: (episodeId: String) -> Unit,
+    wtSessionId: String? = null,
 ) {
-    val viewModel: PlayerViewModel = viewModel(factory = PlayerViewModel.factory(apiClient, kind, contentId, initialPositionMs))
+    val viewModel: PlayerViewModel = viewModel(factory = PlayerViewModel.factory(apiClient, kind, contentId, initialPositionMs, wtSessionId))
     val context = LocalContext.current
+    val colors = LocalPantheonColors.current
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply { playWhenReady = true }
@@ -182,9 +192,64 @@ fun PlayerScreen(
             override fun onTracksChanged(tracks: Tracks) {
                 currentTracks = tracks
             }
+            // Watch Together, host-only — dispatched to Hermes as an explicit
+            // command so followers apply it immediately rather than waiting
+            // for the next heartbeat-driven sync tick. playWhenReady (not
+            // isPlaying) mirrors PlayerPage.tsx's native 'play'/'pause'
+            // <video> element listeners: it reflects deliberate play/pause
+            // intent, not transient buffering-caused rate drops.
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (viewModel.isWtHost) viewModel.sendWtCommand(if (playWhenReady) "play" else "pause")
+            }
+            // DISCONTINUITY_REASON_SEEK only — excludes the ordinary forward
+            // discontinuities between HLS segments, which aren't a seek at all.
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                if (viewModel.isWtHost && reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    viewModel.sendWtCommand("seek", newPosition.positionMs)
+                }
+            }
         }
         exoPlayer.addListener(listener)
         onDispose { exoPlayer.removeListener(listener) }
+    }
+
+    // Watch Together, host-only — cheap/frequent heartbeat updating Hermes'
+    // extrapolation baseline between explicit commands. Re-keyed on
+    // isWtHost so it starts/stops cleanly across an explicit Leave (which
+    // flips isWtHost back to false without unmounting this screen).
+    LaunchedEffect(viewModel.isWtHost) {
+        if (!viewModel.isWtHost) return@LaunchedEffect
+        while (true) {
+            delay(WT_HEARTBEAT_MS)
+            viewModel.sendWtHeartbeat(exoPlayer.currentPosition, !exoPlayer.playWhenReady)
+        }
+    }
+
+    // Watch Together, follower — apply every event the same way regardless
+    // of type: paused-state always syncs (idempotent, catches a fresh join
+    // or a missed event too), position only snaps immediately for an
+    // explicit seek/pause/play; a plain `sync` tick only corrects once drift
+    // exceeds WT_SYNC_DRIFT_THRESHOLD_MS so ordinary clock/decode jitter
+    // doesn't cause constant micro-seeking. Mirrors PlayerPage.tsx's
+    // applyWtEvent exactly. Never emits anything for a host (subscription is
+    // only ever opened for a follower), so no isWtHost gate needed here.
+    //
+    // Deliberately trimmed vs. PlayerPage.tsx: a follower's own manual scrub
+    // via PlayerView's native seek bar isn't intercepted into a no-op the
+    // way the web player's own handleSeek does — media3's default controller
+    // doesn't offer an easy per-gesture interception point the way a custom
+    // seek bar does. It's still corrected, just one round trip later (the
+    // next explicit host command or drift-triggered sync tick), rather than
+    // never visibly moving at all.
+    LaunchedEffect(viewModel) {
+        viewModel.wtEvents.collect { event ->
+            event.positionMs?.let { ms ->
+                val drift = kotlin.math.abs(ms - exoPlayer.currentPosition)
+                if (event.type != "sync" || drift > WT_SYNC_DRIFT_THRESHOLD_MS) exoPlayer.seekTo(ms)
+            }
+            if (event.paused == true && exoPlayer.playWhenReady) exoPlayer.pause()
+            else if (event.paused == false && !exoPlayer.playWhenReady) exoPlayer.play()
+        }
     }
 
     var showTrackMenu by remember { mutableStateOf(false) }
@@ -242,10 +307,10 @@ fun PlayerScreen(
             )
         }
         if (viewModel.loading) {
-            CircularProgressIndicator(color = GoldColor, modifier = Modifier.align(Alignment.Center))
+            CircularProgressIndicator(color = colors.gold, modifier = Modifier.align(Alignment.Center))
         }
         viewModel.errorMessage?.let { message ->
-            Text(message, color = Color.White, modifier = Modifier.align(Alignment.Center))
+            Text(message, color = colors.txt, modifier = Modifier.align(Alignment.Center))
         }
 
         if (showUpNext) {
@@ -266,6 +331,27 @@ fun PlayerScreen(
                 onDismiss = { showTrackMenu = false },
             )
         }
+
+        if (viewModel.wtActive) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.bg.copy(alpha = 0.8f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (viewModel.isWtHost) "Hosting Watch Together" else "Watching Together",
+                    color = colors.txt,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                TextButton(onClick = { viewModel.leaveWatchTogether() }) {
+                    Text(if (viewModel.isWtHost) "End" else "Leave", color = colors.gold)
+                }
+            }
+        }
     }
 
     BackHandler(onBack = onBack)
@@ -279,6 +365,7 @@ private fun UpNextOverlay(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val colors = LocalPantheonColors.current
     var secsLeft by remember { mutableStateOf(UP_NEXT_COUNTDOWN_SECS) }
     val cancelFocusRequester = remember { FocusRequester() }
 
@@ -298,7 +385,7 @@ private fun UpNextOverlay(
         modifier = modifier
             .width(340.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xEE1B1C29))
+            .background(colors.bg.copy(alpha = 0.933f))
             .clickable(onClick = onPlayNow)
             .padding(16.dp),
     ) {
@@ -307,27 +394,27 @@ private fun UpNextOverlay(
                 model = apiClient.mediaUrl("/api/episodes/${nextEpisode.episodeId}/thumb"),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.width(96.dp).aspectRatio(16f / 9f).background(TileBg),
+                modifier = Modifier.width(96.dp).aspectRatio(16f / 9f).background(colors.bg3),
             )
             Column(modifier = Modifier.padding(start = 12.dp).fillMaxWidth()) {
-                Text("Up Next", color = TextDim, style = MaterialTheme.typography.labelSmall)
-                Text("S${nextEpisode.season} · E${nextEpisode.episode}", color = TextDim, style = MaterialTheme.typography.bodySmall)
+                Text("Up Next", color = colors.txt2, style = MaterialTheme.typography.labelSmall)
+                Text("S${nextEpisode.season} · E${nextEpisode.episode}", color = colors.txt2, style = MaterialTheme.typography.bodySmall)
                 Text(
-                    nextEpisode.title, color = Color.White, style = MaterialTheme.typography.bodyMedium,
+                    nextEpisode.title, color = colors.txt, style = MaterialTheme.typography.bodyMedium,
                     maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        Text("Playing Next In: ${secsLeft}s", color = TextDim, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 10.dp))
+        Text("Playing Next In: ${secsLeft}s", color = colors.txt2, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 10.dp))
         TextButton(
             onClick = { onDismiss() },
             modifier = Modifier.focusRequester(cancelFocusRequester),
-        ) { Text("Cancel", color = GoldColor) }
+        ) { Text("Cancel", color = colors.gold) }
         LinearProgressIndicator(
             progress = { 1f - (secsLeft.toFloat() / UP_NEXT_COUNTDOWN_SECS) },
             modifier = Modifier.fillMaxWidth(),
-            color = GoldColor,
-            trackColor = TileBg,
+            color = colors.gold,
+            trackColor = colors.bg3,
         )
     }
 }
@@ -347,6 +434,7 @@ private fun TrackSelectionDialog(
     tracks: Tracks,
     onDismiss: () -> Unit,
 ) {
+    val colors = LocalPantheonColors.current
     val audioGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
     val textGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
     val subtitlesOff = exoPlayer.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
@@ -458,18 +546,18 @@ private fun TrackSelectionDialog(
                     .heightIn(max = 480.dp)
                     .padding(24.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xEE1B1C29))
+                    .background(colors.bg.copy(alpha = 0.933f))
                     .clickable(onClick = {}) // swallow taps so they don't fall through to the scrim's dismiss above
                     .padding(16.dp),
             ) {
                 itemsIndexed(entries) { idx, entry ->
                     when (entry) {
                         is TrackMenuEntry.Header -> Text(
-                            entry.text, color = TextDim, style = MaterialTheme.typography.labelSmall,
+                            entry.text, color = colors.txt2, style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(top = if (idx == 0) 0.dp else 12.dp),
                         )
                         is TrackMenuEntry.Empty -> Text(
-                            entry.text, color = TextDim, style = MaterialTheme.typography.bodySmall,
+                            entry.text, color = colors.txt2, style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(vertical = 6.dp),
                         )
                         is TrackMenuEntry.Row -> TrackRow(
@@ -497,17 +585,18 @@ private sealed interface TrackMenuEntry {
 // navigation in practice even once it actually had focus.
 @Composable
 private fun TrackRow(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalPantheonColors.current
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
     Text(
         label,
-        color = if (selected) GoldColor else Color.White,
+        color = if (selected) colors.gold else colors.txt,
         style = MaterialTheme.typography.bodyMedium,
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
-            .background(if (isFocused) Color(0x33E0B84E) else Color.Transparent)
-            .border(if (isFocused) 2.dp else 0.dp, if (isFocused) GoldColor else Color.Transparent, RoundedCornerShape(6.dp))
+            .background(if (isFocused) colors.gold.copy(alpha = 0.2f) else Color.Transparent)
+            .border(if (isFocused) 2.dp else 0.dp, if (isFocused) colors.gold else Color.Transparent, RoundedCornerShape(6.dp))
             .clickable(interactionSource = interactionSource, indication = LocalIndication.current, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 8.dp),
     )

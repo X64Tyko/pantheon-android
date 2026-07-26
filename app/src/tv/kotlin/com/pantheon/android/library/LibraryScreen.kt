@@ -59,15 +59,7 @@ import coil3.compose.AsyncImage
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.home.HomeMediaItem
 import com.pantheon.android.home.thumbUrl
-
-// Not file-private: TvFilterPanel.kt (same package) reuses these tokens and
-// the TvChip/TvTextButton primitives below.
-val BgColor = Color(0xFF1B1C29)
-val GoldColor = Color(0xFFE0B84E)
-val TextDim = Color(0xFFB5B5C4)
-private val TileBg = Color(0xFF232438)
-// Fallback only — real value comes from LibraryViewModel.themeColor("hds-violet", ...).
-private val VioletFallback = Color(0xFF9991EB)
+import com.pantheon.android.ui.theme.LocalPantheonColors
 
 // TV counterpart of mobile's LibraryScreen.kt: same LibraryViewModel,
 // D-pad-focusable tv.material3 Surfaces instead of clickable modifiers.
@@ -82,6 +74,7 @@ fun LibraryScreen(
     onBack: () -> Unit,
 ) {
     val viewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(apiClient))
+    val colors = LocalPantheonColors.current
     val gridState = rememberLazyGridState()
     val focusManager = LocalFocusManager.current
     var filtersOpen by remember { mutableStateOf(false) }
@@ -166,7 +159,7 @@ fun LibraryScreen(
         )
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
+    Box(modifier = Modifier.fillMaxSize().background(colors.bg)) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 20.dp),
@@ -176,7 +169,7 @@ fun LibraryScreen(
                 Text(
                     "Library",
                     style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White,
+                    color = colors.txt,
                     modifier = Modifier.padding(start = 16.dp).weight(1f),
                 )
                 if (filtersAvailable) {
@@ -209,8 +202,8 @@ fun LibraryScreen(
                             true
                         },
                     colors = ClickableSurfaceDefaults.colors(
-                        containerColor = TileBg,
-                        focusedContainerColor = Color(0xFF2E2F45),
+                        containerColor = colors.bg3,
+                        focusedContainerColor = colors.bg4,
                     ),
                 ) {
                     if (searchEditing) {
@@ -264,7 +257,7 @@ fun LibraryScreen(
                     } else {
                         Text(
                             viewModel.query.ifEmpty { "Search library…" },
-                            color = if (viewModel.query.isEmpty()) TextDim else Color.White,
+                            color = if (viewModel.query.isEmpty()) colors.txt2 else colors.txt,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                         )
                     }
@@ -273,7 +266,7 @@ fun LibraryScreen(
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp)) {
                 if (viewModel.loading) {
-                    CircularProgressIndicator(color = GoldColor, modifier = Modifier.align(Alignment.Center))
+                    CircularProgressIndicator(color = colors.gold, modifier = Modifier.align(Alignment.Center))
                 } else {
                     val items: List<HomeMediaItem> = viewModel.shows.map { HomeMediaItem.ShowItem(it) } +
                         viewModel.movies.map { HomeMediaItem.MovieItem(it) }
@@ -289,7 +282,7 @@ fun LibraryScreen(
                             LibraryTile(
                                 apiClient, item,
                                 onClick = { onOpenDetail(item.contentType, item.id) },
-                                focusBorderColor = viewModel.themeColor("hds-violet", fallback = VioletFallback),
+                                focusBorderColor = viewModel.themeColor("hds-violet", fallback = colors.violet),
                             )
                         }
                         if (viewModel.loadingMore) {
@@ -305,7 +298,7 @@ fun LibraryScreen(
                             // fixed column count).
                             item(key = "loading-more", span = { GridItemSpan(maxLineSpan) }) {
                                 Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(color = GoldColor)
+                                    CircularProgressIndicator(color = colors.gold)
                                 }
                             }
                         }
@@ -318,18 +311,19 @@ fun LibraryScreen(
 
 @Composable
 fun TvChip(label: String, active: Boolean, onClick: () -> Unit) {
+    val colors = LocalPantheonColors.current
     var focused by remember { mutableStateOf(false) }
     Surface(
         onClick = onClick,
         modifier = Modifier.onFocusChanged { focused = it.isFocused },
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (active) GoldColor else Color.Transparent,
-            focusedContainerColor = if (active) GoldColor else Color(0xFF2E2F45),
+            containerColor = if (active) colors.gold else Color.Transparent,
+            focusedContainerColor = if (active) colors.gold else colors.bg4,
         ),
     ) {
         Text(
             label,
-            color = if (active) Color.Black else if (focused) GoldColor else Color.White,
+            color = if (active) colors.txtOnGold else if (focused) colors.gold else colors.txt,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
     }
@@ -337,13 +331,15 @@ fun TvChip(label: String, active: Boolean, onClick: () -> Unit) {
 
 @Composable
 fun TvTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalPantheonColors.current
     Surface(onClick = onClick, modifier = modifier, colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent)) {
-        Text(text, color = Color.White, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+        Text(text, color = colors.txt, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
     }
 }
 
 @Composable
 private fun LibraryTile(apiClient: ApiClient, item: HomeMediaItem, onClick: () -> Unit, focusBorderColor: Color) {
+    val colors = LocalPantheonColors.current
     var focused by remember { mutableStateOf(false) }
     Column {
         // Surface's own default focusedScale (1.1x, see androidx.tv.material3
@@ -371,19 +367,19 @@ private fun LibraryTile(apiClient: ApiClient, item: HomeMediaItem, onClick: () -
             Surface(
                 onClick = onClick,
                 modifier = Modifier.fillMaxSize().onFocusChanged { focused = it.isFocused },
-                colors = ClickableSurfaceDefaults.colors(containerColor = TileBg),
+                colors = ClickableSurfaceDefaults.colors(containerColor = colors.bg3),
             ) {
                 AsyncImage(model = item.thumbUrl(apiClient), contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             }
         }
         Text(
             item.title,
-            color = if (focused) GoldColor else Color.White,
+            color = if (focused) colors.gold else colors.txt,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp),
         )
-        item.year?.let { Text(it.toString(), color = TextDim) }
+        item.year?.let { Text(it.toString(), color = colors.txt2) }
     }
 }
 

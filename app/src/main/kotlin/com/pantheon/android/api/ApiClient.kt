@@ -3,7 +3,11 @@ package com.pantheon.android.api
 import com.pantheon.android.auth.TokenStore
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.Response
+import okhttp3.sse.EventSource
+import okhttp3.sse.EventSourceListener
+import okhttp3.sse.EventSources
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException
@@ -52,6 +56,30 @@ class ApiClient(private val tokenStore: TokenStore) {
     }
 
     fun liveChannelManifestUrl(channelId: String): String = streamUrl("/stream/hls/channels/$channelId/playlist.m3u8")
+
+    // WatchTogetherSession.hostUserId comparison needs "who am I" — exposed
+    // here rather than handing ViewModels a raw TokenStore reference, same
+    // narrow-surface reasoning mediaUrl()/streamUrl() already follow.
+    val currentUserId: String? get() = tokenStore.currentUserId
+
+    // Hermes' GET /watch-together/:id/stream (Server-Sent Events) — Retrofit
+    // has no SSE support, so this bypasses it and opens a raw OkHttp
+    // EventSource instead. A dedicated client (not the shared Retrofit one
+    // buildRetrofit() builds per server URL) with an unbounded read timeout:
+    // the stream is meant to sit open for the whole Watch Together session,
+    // and Hermes' own `: ping` comment every ~15s (see
+    // WatchTogetherRouter.cpp) is what keeps it alive, not a request/response
+    // round trip a normal timeout would expect. Caller owns the returned
+    // EventSource's lifecycle (cancel() it when done).
+    fun openWatchTogetherStream(sessionId: String, listener: EventSourceListener): EventSource {
+        val request = Request.Builder()
+            .url(streamUrl("/watch-together/$sessionId/stream"))
+            .addHeader("X-Pantheon-Surface", "tv")
+            .apply { tokenStore.token?.let { addHeader("Authorization", "Bearer $it") } }
+            .build()
+        val client = OkHttpClient.Builder().readTimeout(0, TimeUnit.SECONDS).build()
+        return EventSources.createFactory(client).newEventSource(request, listener)
+    }
 
     private fun normalizedBaseUrl(): String {
         val raw = tokenStore.serverUrl?.trim().orEmpty()

@@ -56,22 +56,7 @@ import coil3.compose.AsyncImage
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.api.dto.Channel
 import com.pantheon.android.api.dto.EpgProgram
-
-private val BgColor = Color(0xFF1B1C29)
-private val GoldColor = Color(0xFFE0B84E)
-private val TextDim = Color(0xFFB5B5C4)
-private val TileBg = Color(0xFF232438)
-private val TileBgLight = Color(0xFF2B2C42)
-private val LineColor = Color(0xFF34343F)
-private val VioletColor = Color(0xFF9991EB)
-
-// The now-block's progress split — dark above where "now" falls within the
-// block, lighter below. Real oklch(0.32 0.10 292)/oklch(0.58 0.12 288) →
-// sRGB conversion (same purple family as hds-violet, just a wider
-// light/dark spread than that single token gives) — mirrors
-// hades/src/guide/ChannelColumn.tsx's NOW_DARK/NOW_LIGHT exactly.
-private val NowDark = Color(0xFF352661)
-private val NowLight = Color(0xFF786DBD)
+import com.pantheon.android.ui.theme.LocalPantheonColors
 
 private val COLUMN_WIDTH = 220.dp
 // 56dp, not the original 84dp — that was sized for the old stacked
@@ -103,8 +88,9 @@ fun GuideScreen(
     onNavigateLibrary: () -> Unit,
 ) {
     val viewModel: GuideViewModel = viewModel(factory = GuideViewModel.factory(apiClient))
+    val colors = LocalPantheonColors.current
 
-    Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
+    Box(modifier = Modifier.fillMaxSize().background(colors.bg)) {
         // A Box, not a Column — the grid section (drawn second, so it
         // paints on top) is positioned starting HEADER_OVERLAP above where
         // the preview visually ends, not right after it in normal flow.
@@ -136,9 +122,9 @@ fun GuideScreen(
 
         val gridAreaModifier = Modifier.fillMaxSize().padding(top = PREVIEW_HEIGHT - HEADER_OVERLAP, start = 40.dp, end = 40.dp, bottom = 12.dp)
         if (viewModel.loading) {
-            Box(gridAreaModifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = GoldColor) }
+            Box(gridAreaModifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = colors.gold) }
         } else if (viewModel.errorMessage != null) {
-            Box(gridAreaModifier, contentAlignment = Alignment.Center) { Text(viewModel.errorMessage!!, color = TextDim) }
+            Box(gridAreaModifier, contentAlignment = Alignment.Center) { Text(viewModel.errorMessage!!, color = colors.txt2) }
         } else if (viewModel.hasZone("time-grid") || viewModel.hasZone("channel-header")) {
             GuideGridSection(apiClient, viewModel, onWatch = onWatchChannel, modifier = gridAreaModifier)
         }
@@ -147,6 +133,7 @@ fun GuideScreen(
 
 @Composable
 private fun GuidePreviewPanel(viewModel: GuideViewModel, onWatch: (String) -> Unit, onNavigateHome: () -> Unit, onNavigateLibrary: () -> Unit) {
+    val colors = LocalPantheonColors.current
     // Default D-pad initial-focus landing isn't guaranteed to land inside
     // the channel grid — the Home/Library buttons overlaid below are
     // composed first — select the first channel explicitly so the preview
@@ -188,16 +175,16 @@ private fun GuidePreviewPanel(viewModel: GuideViewModel, onWatch: (String) -> Un
         if (channel != null) {
             Column(modifier = Modifier.align(Alignment.BottomStart).padding(28.dp).widthIn(max = 640.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Ch ${channel.number} · ${channel.name}", color = TextDim, style = MaterialTheme.typography.labelLarge)
+                    Text("Ch ${channel.number} · ${channel.name}", color = colors.txt2, style = MaterialTheme.typography.labelLarge)
                     channel.contentTag?.takeIf { it.isNotBlank() }?.let { tag ->
                         Text(
-                            tag, color = Color.White,
-                            modifier = Modifier.padding(start = 10.dp).background(TileBg, RoundedCornerShape(4.dp)).padding(horizontal = 8.dp, vertical = 2.dp),
+                            tag, color = colors.txt,
+                            modifier = Modifier.padding(start = 10.dp).background(colors.bg3, RoundedCornerShape(4.dp)).padding(horizontal = 8.dp, vertical = 2.dp),
                         )
                     }
                 }
                 val title = if (program?.itemType == "episode") program.showTitle ?: program.title else program?.title ?: "No program info"
-                Text(title, style = MaterialTheme.typography.headlineSmall, color = Color.White, modifier = Modifier.padding(top = 6.dp))
+                Text(title, style = MaterialTheme.typography.headlineSmall, color = colors.txt, modifier = Modifier.padding(top = 6.dp))
 
                 val epLabel = if (program?.itemType == "episode" && program.season != null && program.episodeNum != null) {
                     "S${program.season.toString().padStart(2, '0')}E${program.episodeNum.toString().padStart(2, '0')}"
@@ -206,13 +193,13 @@ private fun GuidePreviewPanel(viewModel: GuideViewModel, onWatch: (String) -> Un
                 val startsInMs = if (program != null && !isLive && program.wallClockStartMs > viewModel.nowMs) program.wallClockStartMs - viewModel.nowMs else null
                 if (epLabel != null || program?.itemType == "episode" || startsInMs != null) {
                     Row(modifier = Modifier.padding(top = 4.dp)) {
-                        epLabel?.let { Text(it, color = TextDim, modifier = Modifier.padding(end = 12.dp)) }
-                        if (program?.itemType == "episode") Text(program.title, color = TextDim, modifier = Modifier.padding(end = 12.dp))
-                        startsInMs?.let { Text("Starts in ${formatCountdown(it)}", color = GoldColor) }
+                        epLabel?.let { Text(it, color = colors.txt2, modifier = Modifier.padding(end = 12.dp)) }
+                        if (program?.itemType == "episode") Text(program.title, color = colors.txt2, modifier = Modifier.padding(end = 12.dp))
+                        startsInMs?.let { Text("Starts in ${formatCountdown(it)}", color = colors.gold) }
                     }
                 }
                 program?.overview?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, color = TextDim, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                    Text(it, color = colors.txt2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
                 }
                 TvTextButton(text = "▶  Watch", onClick = { onWatch(channel.channelId) }, modifier = Modifier.padding(top = 10.dp))
             }
@@ -230,6 +217,7 @@ private fun formatCountdown(ms: Long): String {
 
 @Composable
 private fun GuideGridSection(apiClient: ApiClient, viewModel: GuideViewModel, onWatch: (String) -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalPantheonColors.current
     val horizontalScroll = rememberScrollState()
     val verticalScroll = rememberScrollState()
     val density = LocalDensity.current
@@ -243,7 +231,7 @@ private fun GuideGridSection(apiClient: ApiClient, viewModel: GuideViewModel, on
         verticalScroll.scrollTo((nowOffsetPx - paddingPx).toInt().coerceAtLeast(0))
     }
 
-    Column(modifier = modifier.border(1.dp, LineColor, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
+    Column(modifier = modifier.border(1.dp, colors.glassBorder, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
         Row(modifier = Modifier.horizontalScroll(horizontalScroll)) {
             viewModel.channels.forEach { ch ->
                 ChannelHeaderCell(
@@ -274,7 +262,7 @@ private fun GuideGridSection(apiClient: ApiClient, viewModel: GuideViewModel, on
                         var y = phasePx
                         val strokePx = 1.dp.toPx()
                         while (y < size.height) {
-                            if (y >= 0) drawLine(LineColor, Offset(0f, y), Offset(size.width, y), strokeWidth = strokePx)
+                            if (y >= 0) drawLine(colors.glassBorder, Offset(0f, y), Offset(size.width, y), strokeWidth = strokePx)
                             y += lineSpacingPx
                         }
                     },
@@ -299,13 +287,14 @@ private fun GuideGridSection(apiClient: ApiClient, viewModel: GuideViewModel, on
 // far less vertical room for the same content.
 @Composable
 private fun ChannelHeaderCell(apiClient: ApiClient, channel: Channel, focused: Boolean, onFocus: () -> Unit, onWatch: () -> Unit) {
+    val colors = LocalPantheonColors.current
     Surface(
         onClick = onWatch,
         modifier = Modifier.width(COLUMN_WIDTH).height(HEADER_HEIGHT).onFocusChanged { if (it.isFocused) onFocus() },
-        colors = ClickableSurfaceDefaults.colors(containerColor = if (focused) TileBgLight else TileBg),
+        colors = ClickableSurfaceDefaults.colors(containerColor = if (focused) colors.bg4 else colors.bg3),
     ) {
         Row(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(channel.number.toString(), color = if (focused) GoldColor else TextDim, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(end = 8.dp))
+            Text(channel.number.toString(), color = if (focused) colors.gold else colors.txt2, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(end = 8.dp))
             Box(modifier = Modifier.fillMaxHeight().weight(1f), contentAlignment = Alignment.Center) {
                 if (channel.logoPath != null) {
                     AsyncImage(
@@ -315,7 +304,7 @@ private fun ChannelHeaderCell(apiClient: ApiClient, channel: Channel, focused: B
                         modifier = Modifier.fillMaxHeight().padding(vertical = 6.dp),
                     )
                 } else {
-                    Text(channel.name, color = TextDim, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(channel.name, color = colors.txt2, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -342,6 +331,7 @@ private fun ChannelColumnCell(
 
 @Composable
 private fun ProgramBlockCell(program: EpgProgram, windowStartMs: Long, nowMs: Long, onFocus: () -> Unit, onWatch: () -> Unit) {
+    val colors = LocalPantheonColors.current
     val topMin = (program.wallClockStartMs - windowStartMs) / 60_000f
     val heightMin = (program.wallClockEndMs - program.wallClockStartMs) / 60_000f
     val topDp = (topMin * PX_PER_MIN).dp
@@ -360,9 +350,9 @@ private fun ProgramBlockCell(program: EpgProgram, windowStartMs: Long, nowMs: Lo
     } else program.title
 
     val background = when {
-        isNow -> Brush.verticalGradient(0f to NowDark, nowFraction to NowDark, nowFraction to NowLight, 1f to NowLight)
-        isPast -> Brush.verticalGradient(listOf(TileBg.copy(alpha = 0.55f), TileBg.copy(alpha = 0.55f)))
-        else -> Brush.verticalGradient(listOf(TileBgLight, TileBgLight))
+        isNow -> Brush.verticalGradient(0f to colors.violetDeep, nowFraction to colors.violetDeep, nowFraction to colors.violet, 1f to colors.violet)
+        isPast -> Brush.verticalGradient(listOf(colors.bg3.copy(alpha = 0.55f), colors.bg3.copy(alpha = 0.55f)))
+        else -> Brush.verticalGradient(listOf(colors.bg4, colors.bg4))
     }
 
     Surface(
@@ -373,8 +363,8 @@ private fun ProgramBlockCell(program: EpgProgram, windowStartMs: Long, nowMs: Lo
             .height((heightDp - 2.dp).coerceAtLeast(16.dp))
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() },
         border = ClickableSurfaceDefaults.border(
-            border = Border(BorderStroke(1.dp, if (isNow) VioletColor else LineColor)),
-            focusedBorder = Border(BorderStroke(1.dp, GoldColor)),
+            border = Border(BorderStroke(1.dp, if (isNow) colors.violet else colors.glassBorder)),
+            focusedBorder = Border(BorderStroke(1.dp, colors.gold)),
         ),
         colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent),
     ) {
@@ -384,7 +374,7 @@ private fun ProgramBlockCell(program: EpgProgram, windowStartMs: Long, nowMs: Lo
             }
             Text(
                 label,
-                color = if (isNow) Color.White else TextDim,
+                color = if (isNow) colors.txt else colors.txt2,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -401,6 +391,7 @@ private fun ProgramBlockCell(program: EpgProgram, windowStartMs: Long, nowMs: Lo
 // real rendered height in Dp is known.
 @Composable
 private fun NowPulseLine(topOffset: Dp) {
+    val colors = LocalPantheonColors.current
     val transition = rememberInfiniteTransition(label = "nowPulse")
     val alpha by transition.animateFloat(
         initialValue = 0.65f,
@@ -413,28 +404,29 @@ private fun NowPulseLine(topOffset: Dp) {
             .fillMaxWidth()
             .height(2.dp)
             .offset(y = topOffset - 1.dp)
-            .background(VioletColor.copy(alpha = alpha)),
+            .background(colors.violet.copy(alpha = alpha)),
     )
 }
 
 @Composable
 private fun TvTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalPantheonColors.current
     Surface(onClick = onClick, modifier = modifier, colors = ClickableSurfaceDefaults.colors(containerColor = Color.Black.copy(alpha = 0.4f))) {
-        Text(text, color = Color.White, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+        Text(text, color = colors.txt, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
     }
 }
 
 // Same transparent-pill style as HomeScreen.kt's own FocusableTextButton —
-// duplicated rather than shared, same as this file's own BgColor/GoldColor/
-// etc. constants (no shared TV UI layer between screens, only the shared
-// ViewModel/DTOs).
+// duplicated rather than shared (no shared TV UI layer between screens,
+// only the shared ViewModel/DTOs/LocalPantheonColors).
 @Composable
 private fun FocusableTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalPantheonColors.current
     Surface(
         onClick = onClick,
         modifier = modifier,
         colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent),
     ) {
-        Text(text, color = Color.White, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        Text(text, color = colors.txt, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
     }
 }
