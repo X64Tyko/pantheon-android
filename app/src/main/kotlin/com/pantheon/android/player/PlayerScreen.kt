@@ -70,12 +70,9 @@ private const val UP_NEXT_FALLBACK_WINDOW_MS = 30_000L
 // interval (WatchTogetherManager::tickSync, main.cpp), so a follower's
 // authoritative position is never more than one tick stale.
 private const val WT_HEARTBEAT_MS = 4_000L
-// Watch Together: how far a follower's local position must drift from a
-// periodic `sync` tick's authoritative one before snapping to it — small
-// clock/decode jitter shouldn't cause constant micro-seeking, but a stalled
-// rebuffer or a fresh join should correct promptly. Mirrors PlayerPage.tsx's
-// identical constant.
-private const val WT_SYNC_DRIFT_THRESHOLD_MS = 1_500L
+// WT_SYNC_DRIFT_THRESHOLD_MS now lives in WtEventEffect.kt, alongside the
+// pure decision logic that uses it (pulled out so it's unit-testable without
+// a real ExoPlayer instance) — see computeWtEventEffect below.
 
 // Shared by both flavors, unlike Home/Library/Detail — media3-ui's
 // PlayerView is a classic Android View with its own built-in D-pad-navigable
@@ -243,12 +240,10 @@ fun PlayerScreen(
     // never visibly moving at all.
     LaunchedEffect(viewModel) {
         viewModel.wtEvents.collect { event ->
-            event.positionMs?.let { ms ->
-                val drift = kotlin.math.abs(ms - exoPlayer.currentPosition)
-                if (event.type != "sync" || drift > WT_SYNC_DRIFT_THRESHOLD_MS) exoPlayer.seekTo(ms)
-            }
-            if (event.paused == true && exoPlayer.playWhenReady) exoPlayer.pause()
-            else if (event.paused == false && !exoPlayer.playWhenReady) exoPlayer.play()
+            val effect = computeWtEventEffect(event, exoPlayer.currentPosition, isPaused = !exoPlayer.playWhenReady)
+            effect.seekToMs?.let { exoPlayer.seekTo(it) }
+            if (effect.pause) exoPlayer.pause()
+            else if (effect.play) exoPlayer.play()
         }
     }
 
