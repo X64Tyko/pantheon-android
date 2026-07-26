@@ -26,6 +26,18 @@ import kotlinx.coroutines.launch
 private const val SELECT_DEBOUNCE_MS = 300L
 private const val CLOCK_TICK_MS = 30_000L
 
+// A program is "live" iff wallClockStartMs <= nowMs < wallClockEndMs (start
+// inclusive, end exclusive — a program ending exactly at nowMs is NOT live)
+// — same boundary rule as hades/src/guide/useGuideSession.ts's
+// findLiveProgram/GuidePreview.tsx's computePreviewTiming. Extracted as a
+// standalone top-level function (mirrors util/QueryParams.kt's own doc on
+// why: directly unit-testable without spinning up a ViewModel/ApiClient) —
+// GuideViewModel.nowMs is driven off System.currentTimeMillis() with no seam
+// to inject a fixed clock, so testing this boundary math through the
+// ViewModel's nowProgram getter directly would be flaky by construction.
+fun findLiveProgram(programs: List<EpgProgram>, nowMs: Long): EpgProgram? =
+    programs.find { it.wallClockStartMs <= nowMs && nowMs < it.wallClockEndMs }
+
 // Matches hades/src/guide/constants.ts's WINDOW_LOOKBACK_MIN/
 // WINDOW_FORWARD_HOURS exactly — a real multi-hour grid (GuideScreen.kt, both
 // flavors) needs the same window web's does, not the old channel-list
@@ -85,9 +97,7 @@ class GuideViewModel(private val apiClient: ApiClient) : ViewModel() {
 
     val focusedChannel: Channel? get() = channels.find { it.channelId == focusedChannelId }
     val nowProgram: EpgProgram?
-        get() = focusedChannelId?.let { id ->
-            epgByChannel[id]?.find { it.wallClockStartMs <= nowMs && nowMs < it.wallClockEndMs }
-        }
+        get() = focusedChannelId?.let { id -> findLiveProgram(epgByChannel[id] ?: emptyList(), nowMs) }
 
     var previewManifestUrl by mutableStateOf<String?>(null)
         private set
@@ -98,6 +108,14 @@ class GuideViewModel(private val apiClient: ApiClient) : ViewModel() {
     private var startingJob: Job? = null
     private var selectJob: Job? = null
     private var generation = 0
+    // A channel focus that arrived while startingJob was still in flight —
+    // applied via switchPreview() once that start resolves, mirroring
+    // hades/src/guide/previewSessionController.ts's begin()'s
+    // `starting.then(...)` queuing. Racing a second startPreview() instead
+    // would orphan one of the two resulting ffmpeg processes; silently
+    // dropping the focus (the bug this fixed) left the preview visibly
+    // stuck on the pre-start channel after a rapid D-pad re-focus.
+    private var pendingChannelId: String? = null
 
     init {
         load()
@@ -178,13 +196,20 @@ class GuideViewModel(private val apiClient: ApiClient) : ViewModel() {
             viewModelScope.launch { runCatching { apiClient.service.switchPreview(currentSession, PreviewSwitchRequest(channelId)) } }
             return
         }
-        if (startingJob?.isActive == true) return // one start in flight; the debounce above already coalesces rapid re-selection
+        if (startingJob?.isActive == true) {
+            // One start already in flight — queue onto it rather than dropping
+            // it or racing a second startPreview(). Last caller wins if more
+            // than one focus lands before the start resolves.
+            pendingChannelId = channelId
+            return
+        }
         previewLoading = true
         startingJob = viewModelScope.launch {
             val result = runCatching { apiClient.service.startPreview(PreviewStartRequest(channelId)) }
             if (generation != myGen) {
                 // Superseded (screen left / another selection raced ahead) — stop what we just started rather than leak it.
                 result.getOrNull()?.let { res -> runCatching { apiClient.service.stopPreview(res.sessionId) } }
+                pendingChannelId = null
                 return@launch
             }
             result.onSuccess { res ->
@@ -192,6 +217,13 @@ class GuideViewModel(private val apiClient: ApiClient) : ViewModel() {
                 previewManifestUrl = apiClient.streamUrl(res.manifestUrl)
             }
             previewLoading = false
+
+            val pending = pendingChannelId
+            pendingChannelId = null
+            val startedSession = result.getOrNull()
+            if (pending != null && pending != channelId && startedSession != null) {
+                viewModelScope.launch { runCatching { apiClient.service.switchPreview(startedSession.sessionId, PreviewSwitchRequest(pending)) } }
+            }
         }
     }
 
@@ -205,6 +237,7 @@ class GuideViewModel(private val apiClient: ApiClient) : ViewModel() {
     @OptIn(DelicateCoroutinesApi::class)
     private fun stopCurrentPreview() {
         generation++ // invalidates any in-flight start so it self-stops on resolve
+        pendingChannelId = null
         sessionId?.let { sid -> GlobalScope.launch(Dispatchers.IO) { runCatching { apiClient.service.stopPreview(sid) } } }
         sessionId = null
         previewManifestUrl = null

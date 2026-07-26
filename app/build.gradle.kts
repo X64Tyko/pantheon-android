@@ -187,4 +187,14 @@ dependencies {
     // util/QueryParams.kt: pure functions extracted out of their ViewModels
     // specifically so this layer of logic is directly testable.
     testImplementation("junit:junit:4.13.2")
+    // Mocking ApiClient/KairosApi (both plain constructor-injected classes,
+    // no DI framework in this app) without needing a real server or
+    // Robolectric — MockK handles final Kotlin classes natively (no
+    // all-open/mockito-inline plugin needed).
+    testImplementation("io.mockk:mockk:1.14.11")
+    // ViewModels launch on viewModelScope (Dispatchers.Main under the hood)
+    // — runTest + Dispatchers.setMain(StandardTestDispatcher()) is what lets
+    // a plain JVM unit test (no Android runtime/Looper) drive that
+    // coroutine to completion deterministically.
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }

@@ -85,16 +85,11 @@ fun HomeScreen(
     }
 
     // "Play" from any shelf resumes real progress, not just the dedicated
-    // Continue Watching row — every content_type now has a server-side
-    // resolve-play-target lookup (movies included, see kairos's
-    // PlaybackService.cpp) so no call site needs to special-case position 0.
+    // Continue Watching row — see resolveShelfPlayTarget's own comment
+    // (PlayResolution.kt, shared with the mobile flavor's HomeScreen.kt).
     fun resolveAndPlay(contentType: String, id: String) {
         scope.launch {
-            val target = if (contentType == "movie") {
-                runCatching { apiClient.service.getResolvedMoviePlayTarget(id) }.getOrNull()
-            } else {
-                runCatching { apiClient.service.getResolvedPlayTarget(id) }.getOrNull()
-            }
+            val target = resolveShelfPlayTarget(apiClient, contentType, id)
             if (target != null) onPlay(target.kind, target.id, target.positionMs)
         }
     }
@@ -110,8 +105,7 @@ fun HomeScreen(
                     // actually sitting on this episode already.
                     scope.launch {
                         val state = runCatching { apiClient.service.getShowWatchState(item.id) }.getOrNull()
-                        val positionMs = if (state?.contentId == latest.episodeId && !state.completed) state.positionMs else 0L
-                        onPlay("episode", latest.episodeId, positionMs)
+                        onPlay("episode", latest.episodeId, resolveLatestEpisodePosition(state, latest.episodeId))
                     }
                 } else onOpenDetail(item.contentType, item.id)
             }
