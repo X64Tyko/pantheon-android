@@ -1,5 +1,6 @@
 package com.pantheon.android.auth
 
+import android.content.res.Resources
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import com.pantheon.android.api.dto.ClientCapabilitiesRequest
@@ -43,6 +44,16 @@ object DeviceCodecCapabilities {
             }
         }
 
-        return ClientCapabilitiesRequest(videoCodecs.toList(), audioCodecs.toList())
+        // Resources.getSystem() (not a passed-in Context) — this is a rough
+        // "what resolution is this device's own screen" signal for the
+        // server's copy-vs-transcode decision (avoid handing a small screen
+        // a full-resolution stream copy it has no use for), not a precise
+        // per-window measurement; no Context available at every detect()
+        // call site (AuthViewModel isn't an AndroidViewModel) and none is
+        // needed for that purpose.
+        val metrics = Resources.getSystem().displayMetrics
+        val maxHeight = maxOf(metrics.widthPixels, metrics.heightPixels)
+
+        return ClientCapabilitiesRequest(videoCodecs.toList(), audioCodecs.toList(), maxHeight)
     }
 }

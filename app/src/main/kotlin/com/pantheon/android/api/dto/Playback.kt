@@ -28,6 +28,17 @@ data class VodStartResponse(
     val title: String = "",
 )
 
+// POST /stream/channel/{id}/start response — capability-bucketed live
+// channel HLS (see hephaestus/src/stream/ChannelViewerRegistry.h). Mirrors
+// VodStartResponse's shape; no request body needed, the server resolves the
+// bucket from this caller's already-declared ClientCapabilitiesRequest
+// (below) against the channel's currently-playing item.
+data class ChannelViewerStartResponse(
+    @SerializedName("viewer_session_id") val viewerSessionId: String,
+    @SerializedName("manifest_url") val manifestUrl: String,
+    @SerializedName("direct_stream") val directStream: Boolean = false,
+)
+
 data class WatchProgressBody(
     @SerializedName("position_ms") val positionMs: Long,
     @SerializedName("duration_ms") val durationMs: Long,
@@ -50,4 +61,9 @@ data class WatchProgressBody(
 data class ClientCapabilitiesRequest(
     @SerializedName("video_codecs") val videoCodecs: List<String>,
     @SerializedName("audio_codecs") val audioCodecs: List<String>,
+    // This device's real display height (see DeviceCodecCapabilities.detect)
+    // — without it, a copy-eligible "native" bucket has no signal to avoid
+    // handing a small-screen device a full-resolution stream copy it has no
+    // use for. Omitted (null) falls back to uncapped server-side.
+    @SerializedName("max_height") val maxHeight: Int? = null,
 )

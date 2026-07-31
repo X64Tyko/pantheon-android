@@ -4,6 +4,7 @@ import com.pantheon.android.api.dto.AuthResponse
 import com.pantheon.android.api.dto.AuthUser
 import com.pantheon.android.api.dto.Channel
 import com.pantheon.android.api.dto.ChannelAccessResponse
+import com.pantheon.android.api.dto.ChannelViewerStartResponse
 import com.pantheon.android.api.dto.ClientCapabilitiesRequest
 import com.pantheon.android.api.dto.ClientLogBody
 import com.pantheon.android.api.dto.Episode
@@ -151,6 +152,18 @@ interface KairosApi {
 
     @POST("stream/vod/{id}/stop")
     suspend fun stopVodPlayback(@Path("id") sessionId: String): Response<Unit>
+
+    // Capability-bucketed live channel HLS (see hephaestus/src/stream/
+    // ChannelViewerRegistry.h) — an opt-in per-viewer session on top of the
+    // legacy liveChannelManifestUrl(), which stays as the fallback. No
+    // request body: the server resolves the bucket from this caller's
+    // already-declared ClientCapabilitiesRequest against the channel's
+    // current item.
+    @POST("stream/channel/{id}/start")
+    suspend fun startChannelViewer(@Path("id") channelId: String): ChannelViewerStartResponse
+
+    @POST("stream/channel/viewer/{id}/stop")
+    suspend fun stopChannelViewer(@Path("id") viewerSessionId: String): Response<Unit>
 
     // Declares this device's real decode capability once per session
     // (login/profile-switch/app-launch — see AuthViewModel's own comment on

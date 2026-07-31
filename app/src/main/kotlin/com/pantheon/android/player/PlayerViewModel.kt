@@ -91,6 +91,11 @@ class PlayerViewModel(
         private set
 
     private var sessionId: String? = null
+    // Capability-bucketed live channel viewer identity (see hephaestus/src/
+    // stream/ChannelViewerRegistry.h) — separate id-space from sessionId
+    // (VOD's session_id); only one of the two is ever populated, based on
+    // isLive.
+    private var viewerSessionId: String? = null
     private var generation = 0
 
     // ── Watch Together ───────────────────────────────────────────────────────
@@ -200,10 +205,13 @@ class PlayerViewModel(
         val myGen = ++generation
         val prevSession = sessionId
         sessionId = null
+        val prevViewerSession = viewerSessionId
+        viewerSessionId = null
         basePositionMs = positionMs
 
         viewModelScope.launch {
             prevSession?.let { runCatching { apiClient.service.stopVodPlayback(it) } }
+            prevViewerSession?.let { runCatching { apiClient.service.stopChannelViewer(it) } }
 
             if (isLive) {
                 loading = true
@@ -215,7 +223,24 @@ class PlayerViewModel(
                     loading = false
                     return@launch
                 }
-                manifestUrl = apiClient.liveChannelManifestUrl(contentId)
+                // Capability-bucketed viewer session — purely an optimization
+                // on top of a path that already works (see playbackApi.ts's
+                // sibling comment): any failure here silently falls back to
+                // the legacy anonymous manifest URL rather than surfacing an
+                // error.
+                val viewerResult = runCatching { apiClient.service.startChannelViewer(contentId) }
+                if (generation != myGen) {
+                    viewerResult.getOrNull()?.let { res -> runCatching { apiClient.service.stopChannelViewer(res.viewerSessionId) } }
+                    return@launch
+                }
+                viewerResult.onSuccess { res ->
+                    viewerSessionId = res.viewerSessionId
+                    manifestUrl = apiClient.streamUrl(res.manifestUrl)
+                    directStream = res.directStream
+                }.onFailure {
+                    manifestUrl = apiClient.liveChannelManifestUrl(contentId)
+                    directStream = false
+                }
                 loading = false
                 return@launch
             }
@@ -300,8 +325,8 @@ class PlayerViewModel(
                 } }
             }
         }
-        val sid = sessionId ?: return
-        GlobalScope.launch(Dispatchers.IO) { runCatching { apiClient.service.stopVodPlayback(sid) } }
+        sessionId?.let { sid -> GlobalScope.launch(Dispatchers.IO) { runCatching { apiClient.service.stopVodPlayback(sid) } } }
+        viewerSessionId?.let { vid -> GlobalScope.launch(Dispatchers.IO) { runCatching { apiClient.service.stopChannelViewer(vid) } } }
     }
 
     companion object {
