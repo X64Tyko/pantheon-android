@@ -47,8 +47,13 @@ data class TvHomeRow(
     val order: Int,
     val type: String, // "hero" | "shelf" | "guide"
     val title: String? = null,
-    val dataSource: TvDataSource? = null,
-    val dataSources: TvHeroDataSources? = null,
+    // Opaque — forwarded verbatim as query params to GET /api/tv/shelf-items
+    // (see KairosApi.getShelfItems). Never inspected/branched on client-side;
+    // the server decides what each key means and how to resolve it into
+    // tiles, so a new shelf "shape" (e.g. a "mixed" shelf, which the old
+    // dataSource.endpoint design couldn't express at all — see
+    // HomeViewModel's own comment) never needs a client-side change.
+    val filter: Map<String, Any>? = null,
     val itemAction: String? = null,
     val endTile: String? = null,
     val emptyBehavior: String? = null,
@@ -56,13 +61,48 @@ data class TvHomeRow(
     val actions: List<String>? = null,
 )
 
-data class TvHeroDataSources(val shows: TvDataSource, val movies: TvDataSource)
-
+// Still used by TvZone (Library/Detail/Guide) — those carry a genuinely
+// different, per-zone endpoint/queryParam config (see kairos's tv_zone seed
+// data) that no client fetches through automatically; only
+// filterFields/fields are actually read. Home rows no longer use this.
 data class TvDataSource(
     val endpoint: String? = null,
     val endpoints: List<String>? = null,
     val params: Map<String, Any>? = null,
     val queryParam: String? = null,
+)
+
+// GET /api/tv/shelf-items' response item shape — render-ready, uniform
+// across show/movie/episode content types (see kairos's MixedTileRow).
+data class ShelfItemsResponse(val items: List<ShelfTile>)
+
+data class ShelfTile(
+    @SerializedName("content_type") val contentType: String, // "show" | "movie" | "episode"
+    val id: String,
+    val title: String,
+    val thumb: String? = null,
+    val art: String? = null,
+    @SerializedName("library_id") val libraryId: String? = null,
+    val year: Int? = null,
+    @SerializedName("audience_rating") val audienceRating: Double? = null,
+    val watched: Boolean = false,
+    @SerializedName("view_count") val viewCount: Long = 0,
+    @SerializedName("episode_count") val episodeCount: Int = 0, // shows only
+    @SerializedName("duration_ms") val durationMs: Long = 0,    // episodes only
+    val season: Int = 0, val episode: Int = 0,                  // episodes only
+    @SerializedName("show_id") val showId: String? = null,      // episodes only
+    @SerializedName("show_title") val showTitle: String? = null, // episodes only
+    // Shows only, populated only when the row's filter.sort is
+    // "recently_aired" — needed by the "Recently Aired" shelf's
+    // play-latest-episode itemAction.
+    @SerializedName("latest_episode") val latestEpisode: ShelfTileLatestEpisode? = null,
+)
+
+data class ShelfTileLatestEpisode(
+    @SerializedName("episode_id") val episodeId: String,
+    val season: Int,
+    val episode: Int,
+    @SerializedName("air_date") val airDate: String,
 )
 
 data class TvZone(

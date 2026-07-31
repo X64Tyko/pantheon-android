@@ -103,10 +103,17 @@ fun HomeScreen(
     // tap the already-selected tile again to play) instead of navigating on
     // the first tap. "Details" always opens Detail; "Play" honors the row's
     // PLAY_LATEST_EPISODE itemAction the same way the old single onClick did.
-    fun shelfItemDetails(item: HomeMediaItem) = onOpenDetail(item.contentType, item.id)
+    // An episode tile (a mixed shelf's per-episode item) has no detail page
+    // of its own — both actions jump straight into that episode, same as
+    // hades' directPlayPath.
+    fun shelfItemDetails(item: HomeMediaItem) {
+        if (item.contentType == "episode") { onPlay("episode", item.id, 0); return }
+        onOpenDetail(item.contentType, item.id)
+    }
     fun shelfItemPlay(row: TvHomeRow, item: HomeMediaItem) {
+        if (item.contentType == "episode") { onPlay("episode", item.id, 0); return }
         if (row.itemAction == TvItemAction.PLAY_LATEST_EPISODE) {
-            val latest = (item as? HomeMediaItem.ShowItem)?.show?.latestEpisode
+            val latest = item.latestEpisode
             if (latest != null) {
                 // The show's resume target might not be this specific latest
                 // episode (viewer could be behind on an earlier one) — only
@@ -312,6 +319,10 @@ private fun ShelfZone(
 @Composable
 private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, selected: Boolean, onTap: () -> Unit, onPlay: () -> Unit, onDetails: () -> Unit) {
     val colors = LocalPantheonColors.current
+    // Episode tile (mixed shelf) — show the parent show's title instead of
+    // the episode's own, same convention as ContinueWatchingZone above and
+    // hades' mixedToShelfEntry.
+    val displayTitle = item.showTitle ?: item.title
     Column(modifier = Modifier.width(120.dp)) {
         Box(
             modifier = Modifier
@@ -323,7 +334,7 @@ private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, selected: Boole
         ) {
             AsyncImage(
                 model = item.thumbUrl(apiClient),
-                contentDescription = item.title,
+                contentDescription = displayTitle,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -338,14 +349,15 @@ private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, selected: Boole
             }
         }
         Text(
-            item.title,
+            displayTitle,
             style = MaterialTheme.typography.bodyMedium,
             color = colors.txt,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp),
         )
-        item.year?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall, color = colors.txt2) }
+        val caption = item.episodeCode ?: item.year?.toString()
+        caption?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.txt2) }
     }
 }
 

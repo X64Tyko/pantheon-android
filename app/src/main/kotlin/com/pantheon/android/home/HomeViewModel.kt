@@ -8,8 +8,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.pantheon.android.api.ApiClient
-import com.pantheon.android.api.dto.TvDataSource
-import com.pantheon.android.api.dto.TvHeroDataSources
 import com.pantheon.android.api.dto.TvHomeRow
 import com.pantheon.android.api.dto.WatchProgress
 import com.pantheon.android.api.dto.WatchTogetherSession
@@ -21,10 +19,17 @@ import kotlinx.coroutines.launch
 
 // Kotlin counterpart of hades/src/tv/useHomeManifest.ts + the manifest-driven
 // half of TvHome.tsx's own state. Fetches GET /api/tv/manifest, then resolves
-// each shelf row's dataSource into real items via the same two endpoints
-// (/api/shows, /api/movies) every platform's manifest consumer calls —
-// nothing here is Android-specific business logic, just the same contract
+// each shelf/hero row's opaque `filter` into real tiles via the one generic
+// GET /api/tv/shelf-items call every manifest consumer makes — nothing here
+// is Android-specific business logic, just the same contract
 // hades/src/tv/TvHome.tsx implements in TypeScript.
+//
+// Unlike the old design (a dataSource.endpoint string this client had to
+// recognize, switching between /api/shows and /api/movies itself), this
+// never branches on what a shelf "is" — the server decides how to resolve
+// filter into tiles, so a new shelf shape (e.g. a "mixed" shelf, which the
+// old dataSource.endpoint design had no way to express at all — it would
+// silently fall back to an empty/wrong row) never needs a client change.
 class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
 
     var rows by mutableStateOf<List<TvHomeRow>>(emptyList())
@@ -52,8 +57,8 @@ class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
         watchTogether = watchTogether.filter { it.sessionId != sessionId }
     }
 
-    // Recently-added shows/movies with backdrop art — the same hero
-    // candidate pool TvHome.tsx's heroCandidates computes.
+    // Server-resolved (art-preferred shows+movies) — the hero row's own
+    // "hero" content_type filter, see fetchShelfItems below.
     var heroCandidates by mutableStateOf<List<HomeMediaItem>>(emptyList())
         private set
     var heroIndex by mutableStateOf(0)
@@ -83,7 +88,8 @@ class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
                 // needs a DB row (see tv_shelf's v81 seed comment), no
                 // client release. continue-watching is a "shelf"-typed row
                 // too, but its data comes from a dedicated endpoint
-                // (getWatchProgress), so it's fetched separately below.
+                // (getWatchProgress), so it's fetched separately below —
+                // it never goes through the generic filter mechanism.
                 val cwRow = rows.find { it.id == "continue-watching" }
                 continueWatching = if (cwRow != null) {
                     runCatching { apiClient.service.getWatchProgress() }.getOrDefault(emptyList())
@@ -94,19 +100,12 @@ class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
                 val shelfRows = rows.filter { it.type == "shelf" && it.id != "continue-watching" }
                 fetchShelfRows(shelfRows)
 
-                // The hero row declares its own two data sources rather than
-                // reusing whatever recent-shows/recent-movies happen to be
-                // configured with (see TvManifestService.cpp's heroRowJson
-                // comment: hero's candidates are a fixed, art-filtered
-                // shows+movies merge, not derived from another row).
-                val heroSources = rows.find { it.type == "hero" }?.dataSources
-                heroCandidates = if (heroSources != null) {
-                    fetchHeroCandidates(heroSources)
-                } else {
-                    val shows = rowItems["recent-shows"].orEmpty()
-                    val movies = rowItems["recent-movies"].orEmpty()
-                    (shows + movies).filter { it.art != null }.ifEmpty { shows }
-                }
+                // Hero's art-filtered shows+movies merge is resolved
+                // server-side (GET /api/tv/shelf-items' "hero" content_type
+                // branch — see TvManifestService.cpp) instead of this client
+                // fetching two sources and merging them itself.
+                val heroRow = rows.find { it.type == "hero" }
+                heroCandidates = if (heroRow != null) fetchShelfItems(heroRow.filter) else emptyList()
                 heroIndex = 0
             } catch (e: Exception) {
                 errorMessage = "Couldn't load Home: ${e.message ?: "unknown error"}"
@@ -118,34 +117,21 @@ class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
 
     private suspend fun fetchShelfRows(rows: List<TvHomeRow>) {
         val results = coroutineScope {
-            rows.map { row -> async { row.id to fetchDataSource(row.dataSource) } }.awaitAll()
+            rows.map { row -> async { row.id to fetchShelfItems(row.filter) } }.awaitAll()
         }
         rowItems = results.toMap()
     }
 
-    private suspend fun fetchHeroCandidates(sources: TvHeroDataSources): List<HomeMediaItem> {
-        val (shows, movies) = coroutineScope {
-            val showsDeferred = async { fetchDataSource(sources.shows) }
-            val moviesDeferred = async { fetchDataSource(sources.movies) }
-            showsDeferred.await() to moviesDeferred.await()
-        }
-        return (shows + movies).filter { it.art != null }.ifEmpty { shows }
-    }
-
-    // The endpoint vocabulary a shelf/hero dataSource can point at — same
-    // "which fields/endpoints exist is server-owned data" split every other
-    // manifest zone follows. An endpoint this client doesn't recognize
-    // degrades to an empty (rather than crashing) row, same as any other
-    // manifest field a client doesn't yet understand.
-    private suspend fun fetchDataSource(ds: TvDataSource?): List<HomeMediaItem> {
-        if (ds?.endpoint == null) return emptyList()
-        val params = toQueryParams(ds.params)
+    // The one generic fetch every shelf/hero row goes through, regardless of
+    // what its filter's content_type says. `filter` is forwarded verbatim as
+    // query params (via toQueryParams) — never inspected here. Any failure
+    // (network, an unrecognized/empty filter) degrades to an empty list
+    // rather than crashing the whole screen, same posture the old
+    // per-endpoint fetch had.
+    private suspend fun fetchShelfItems(filter: Map<String, Any>?): List<HomeMediaItem> {
+        val params = toQueryParams(filter)
         return runCatching {
-            when (ds.endpoint) {
-                "/api/shows"  -> apiClient.service.getShows(params).items.map { HomeMediaItem.ShowItem(it) }
-                "/api/movies" -> apiClient.service.getMovies(params).items.map { HomeMediaItem.MovieItem(it) }
-                else -> emptyList()
-            }
+            apiClient.service.getShelfItems(params).items.map { HomeMediaItem(it) }
         }.getOrDefault(emptyList())
     }
 

@@ -59,6 +59,7 @@ import coil3.compose.AsyncImage
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.home.HomeMediaItem
 import com.pantheon.android.home.thumbUrl
+import com.pantheon.android.home.toShelfTile
 import com.pantheon.android.ui.theme.LocalPantheonColors
 
 // TV counterpart of mobile's LibraryScreen.kt: same LibraryViewModel,
@@ -268,8 +269,8 @@ fun LibraryScreen(
                 if (viewModel.loading) {
                     CircularProgressIndicator(color = colors.gold, modifier = Modifier.align(Alignment.Center))
                 } else {
-                    val items: List<HomeMediaItem> = viewModel.shows.map { HomeMediaItem.ShowItem(it) } +
-                        viewModel.movies.map { HomeMediaItem.MovieItem(it) }
+                    val items: List<HomeMediaItem> = viewModel.shows.map { it.toShelfTile() } +
+                        viewModel.movies.map { it.toShelfTile() }
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(5),
                         state = gridState,

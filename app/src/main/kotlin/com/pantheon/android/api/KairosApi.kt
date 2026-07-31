@@ -19,6 +19,7 @@ import com.pantheon.android.api.dto.PreviewStartRequest
 import com.pantheon.android.api.dto.PreviewStartResponse
 import com.pantheon.android.api.dto.PreviewSwitchRequest
 import com.pantheon.android.api.dto.ResolvedPlayTarget
+import com.pantheon.android.api.dto.ShelfItemsResponse
 import com.pantheon.android.api.dto.Show
 import com.pantheon.android.api.dto.ShowDetail
 import com.pantheon.android.api.dto.ShowWatchState
@@ -69,6 +70,15 @@ interface KairosApi {
 
     @GET("api/tv/manifest")
     suspend fun getTvManifest(): TvManifest
+
+    // Resolves one Home row's opaque TvHomeRow.filter into render-ready
+    // tiles — the one generic call HomeViewModel makes for every shelf and
+    // the hero row, regardless of what the filter's content_type says.
+    // `filter` is forwarded verbatim as query params; this never inspects
+    // its keys, matching the "server decides what a shelf needs, client
+    // just renders it" split the whole /api/tv/manifest contract is built on.
+    @GET("api/tv/shelf-items")
+    suspend fun getShelfItems(@QueryMap filter: Map<String, String>): ShelfItemsResponse
 
     @GET("api/shows")
     suspend fun getShows(@QueryMap params: Map<String, String>): PagedResult<Show>

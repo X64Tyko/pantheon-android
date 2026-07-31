@@ -95,9 +95,16 @@ fun HomeScreen(
     }
 
     fun onShelfItemClick(row: TvHomeRow, item: HomeMediaItem) {
+        // An episode tile (a mixed shelf's per-episode item) has no detail
+        // page of its own — jumps straight into that episode, same as
+        // hades' directPlayPath, regardless of the row's own itemAction.
+        if (item.contentType == "episode") {
+            onPlay("episode", item.id, 0)
+            return
+        }
         when (row.itemAction) {
             TvItemAction.PLAY_LATEST_EPISODE -> {
-                val latest = (item as? HomeMediaItem.ShowItem)?.show?.latestEpisode
+                val latest = item.latestEpisode
                 if (latest != null) {
                     // The show's resume target might not be this specific
                     // latest episode (viewer could be behind on an earlier
@@ -245,6 +252,10 @@ private fun ShelfZone(
 private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, onClick: () -> Unit) {
     val colors = LocalPantheonColors.current
     var focused by remember { mutableStateOf(false) }
+    // Episode tile (mixed shelf) — show the parent show's title instead of
+    // the episode's own, same convention as mobile's HomeScreen.kt and
+    // hades' mixedToShelfEntry.
+    val displayTitle = item.showTitle ?: item.title
     Column(modifier = Modifier.width(140.dp)) {
         Surface(
             onClick = onClick,
@@ -254,16 +265,17 @@ private fun MediaCard(apiClient: ApiClient, item: HomeMediaItem, onClick: () -> 
                 .onFocusChanged { focused = it.isFocused },
             colors = ClickableSurfaceDefaults.colors(containerColor = colors.bg3),
         ) {
-            AsyncImage(model = item.thumbUrl(apiClient), contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            AsyncImage(model = item.thumbUrl(apiClient), contentDescription = displayTitle, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
         Text(
-            item.title,
+            displayTitle,
             style = MaterialTheme.typography.bodyMedium,
             color = if (focused) colors.gold else colors.txt,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp),
         )
-        item.year?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall, color = colors.txt2) }
+        val caption = item.episodeCode ?: item.year?.toString()
+        caption?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.txt2) }
     }
 }
 
