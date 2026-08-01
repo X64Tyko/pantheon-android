@@ -48,6 +48,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -122,6 +125,23 @@ fun PlayerScreen(
     }
     DisposableEffect(Unit) {
         onDispose { exoPlayer.release() }
+    }
+
+    // Pause when the whole app (not just this screen) leaves the foreground —
+    // ProcessLifecycleOwner rather than this Activity's own lifecycle, since
+    // an Activity onStop also fires on ordinary in-app navigation, not just
+    // the app actually backgrounding. Deliberately doesn't resume on
+    // ON_START: an unprompted resume on return would blast audio/video the
+    // user didn't ask to restart. Gated on PlaybackPreferences.pauseOnBackground
+    // (default true) — see its own comment: a future audio/"radio" content
+    // type is the reason this is a real flag and not just inline behavior.
+    val playbackPrefs = remember { PlaybackPreferences(context) }
+    DisposableEffect(exoPlayer) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && playbackPrefs.pauseOnBackground) exoPlayer.pause()
+        }
+        ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
+        onDispose { ProcessLifecycleOwner.get().lifecycle.removeObserver(observer) }
     }
 
     // Bumped by the stall watchdog below to force the effect that follows to
