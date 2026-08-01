@@ -73,6 +73,16 @@ private const val WT_HEARTBEAT_MS = 4_000L
 // WT_SYNC_DRIFT_THRESHOLD_MS now lives in WtEventEffect.kt, alongside the
 // pure decision logic that uses it (pulled out so it's unit-testable without
 // a real ExoPlayer instance) — see computeWtEventEffect below.
+// Live-channel stall watchdog — mirrors hades/src/player/VideoPlayer.tsx's
+// recentStalls/STALL_WINDOW_MS/STALL_THRESHOLD exactly (same root cause:
+// hls.js's gap-controller and media3's own HLS handling can both repeatedly
+// re-buffer at a channel transition's discontinuity without ever surfacing a
+// real playback error — server-side the encode never stopped, client-side
+// it just keeps stalling every couple of seconds until the viewer manually
+// leaves and re-enters the channel). See the DisposableEffect(exoPlayer)
+// listener below for where this is applied.
+private const val STALL_WINDOW_MS = 12_000L
+private const val STALL_THRESHOLD = 3
 
 // Shared by both flavors, unlike Home/Library/Detail — media3-ui's
 // PlayerView is a classic Android View with its own built-in D-pad-navigable
@@ -108,7 +118,13 @@ fun PlayerScreen(
         onDispose { exoPlayer.release() }
     }
 
-    LaunchedEffect(viewModel.manifestUrl) {
+    // Bumped by the stall watchdog below to force the effect that follows to
+    // re-run — re-setting the same manifest URL and calling prepare() again
+    // rebuilds ExoPlayer's whole HLS source (fresh sample queues/extractors),
+    // the same reset a viewer gets by leaving and re-entering the channel.
+    var reloadTick by remember { mutableStateOf(0) }
+
+    LaunchedEffect(viewModel.manifestUrl, reloadTick) {
         val url = viewModel.manifestUrl ?: return@LaunchedEffect
         // No manual subtitle sideloading — the manifest itself is now a
         // multi-rendition HLS master playlist with its own AUDIO/SUBTITLES
@@ -179,9 +195,22 @@ fun PlayerScreen(
     // changes (including from our own dialog's overrides re-triggering it).
     var currentTracks by remember { mutableStateOf(Tracks.EMPTY) }
 
+    // Timestamps (millis) of recent STATE_BUFFERING transitions for the live
+    // stall watchdog — see STALL_WINDOW_MS/STALL_THRESHOLD's own comment.
+    val stallTimestamps = remember { mutableListOf<Long>() }
+
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_BUFFERING && viewModel.isLive) {
+                    val now = System.currentTimeMillis()
+                    stallTimestamps.add(now)
+                    stallTimestamps.removeAll { now - it > STALL_WINDOW_MS }
+                    if (stallTimestamps.size >= STALL_THRESHOLD) {
+                        stallTimestamps.clear()
+                        reloadTick++
+                    }
+                }
                 if (state != Player.STATE_ENDED) return
                 val next = viewModel.nextEpisode
                 if (next != null && !viewModel.upNextDismissed) advance(next) else viewModel.reportCompleted()
