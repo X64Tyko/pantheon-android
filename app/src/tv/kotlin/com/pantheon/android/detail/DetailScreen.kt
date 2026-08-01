@@ -69,8 +69,36 @@ private val TitleTextShadow = Shadow(color = Color.Black, offset = Offset(0f, 2f
 // occasionally win, leaving a focused season/episode centered under the
 // sticky header instead of below it. Suppressing it makes
 // scrollBelowHeader() the only thing that ever scrolls this list.
+//
+// LocalBringIntoViewSpec is a single CompositionLocal read by every
+// scrollable in the subtree it's provided to — providing this at the outer
+// LazyColumn's level (below) also reached the *nested* per-season LazyRow
+// of episode tiles, silently disabling ITS OWN horizontal bring-into-view
+// too. That's what made D-pad navigation through an expanded season's
+// episodes not scroll the row at all: focus moved tile-to-tile fine, but
+// nothing ever brought an off-screen tile into view. StandardBringIntoViewSpec
+// below re-enables normal edge-aligned scrolling scoped to just that LazyRow,
+// overriding this NoOp back for its subtree only (CompositionLocalProvider
+// values resolve to the nearest enclosing provider, not the outermost one).
 private object NoOpBringIntoViewSpec : BringIntoViewSpec {
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float) = 0f
+}
+
+// Standard "scroll the minimal distance to bring the focused item fully
+// into view" behavior (align to whichever edge it's clipped against, don't
+// move at all if already fully visible) — the same behavior
+// LocalBringIntoViewSpec provides by default; reimplemented locally since
+// Compose Foundation's own default implementation is internal to that
+// module and not referenceable here.
+private object StandardBringIntoViewSpec : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        val trailingEdge = offset + size
+        return when {
+            offset < 0f -> offset
+            trailingEdge > containerSize -> trailingEdge - containerSize
+            else -> 0f
+        }
+    }
 }
 
 // TV counterpart of the mobile flavor's DetailScreen.kt. No hero-spacer —
@@ -280,6 +308,12 @@ fun DetailScreen(
                             },
                         )
                         if (expanded) {
+                            // Restores real bring-into-view scrolling for just this
+                            // row — see StandardBringIntoViewSpec's own comment for
+                            // why the outer NoOp (needed for the vertical
+                            // LazyColumn) would otherwise also disable this row's
+                            // horizontal D-pad scrolling.
+                            CompositionLocalProvider(LocalBringIntoViewSpec provides StandardBringIntoViewSpec) {
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 40.dp, vertical = 8.dp),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -294,6 +328,7 @@ fun DetailScreen(
                                         onClick = { onPlay("episode", ep.episodeId, 0) },
                                     )
                                 }
+                            }
                             }
                         }
                     }

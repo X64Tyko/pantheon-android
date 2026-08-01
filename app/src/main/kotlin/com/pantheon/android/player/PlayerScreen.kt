@@ -73,16 +73,22 @@ private const val WT_HEARTBEAT_MS = 4_000L
 // WT_SYNC_DRIFT_THRESHOLD_MS now lives in WtEventEffect.kt, alongside the
 // pure decision logic that uses it (pulled out so it's unit-testable without
 // a real ExoPlayer instance) — see computeWtEventEffect below.
-// Live-channel stall watchdog — mirrors hades/src/player/VideoPlayer.tsx's
-// recentStalls/STALL_WINDOW_MS/STALL_THRESHOLD exactly (same root cause:
-// hls.js's gap-controller and media3's own HLS handling can both repeatedly
-// re-buffer at a channel transition's discontinuity without ever surfacing a
-// real playback error — server-side the encode never stopped, client-side
-// it just keeps stalling every couple of seconds until the viewer manually
-// leaves and re-enters the channel). See the DisposableEffect(exoPlayer)
-// listener below for where this is applied.
-private const val STALL_WINDOW_MS = 12_000L
-private const val STALL_THRESHOLD = 3
+// Live-channel stall watchdog. Deliberately POSITION-based, not
+// STATE_BUFFERING-based: an earlier version counted raw STATE_BUFFERING
+// transitions, but a live channel's own server-side program transitions
+// legitimately pass through STATE_BUFFERING (briefly, while the new ffmpeg
+// process spins up) and recover on their own — counting those as "stuck"
+// fired a forced reload on ordinary transitions, and the reload's own
+// re-buffering could cascade into more buffering events, triggering another
+// reload. Net effect confirmed in the field: chirping on *every* transition,
+// worse than the bug this was meant to fix. Actual playback position
+// failing to advance is the only signal that distinguishes a genuinely
+// wedged stream from normal transition jitter, which always resumes well
+// under STALL_TIMEOUT_MS. See the LaunchedEffect(viewModel.isLive) watchdog
+// below for where this is applied.
+private const val STALL_POLL_MS     = 2_000L
+private const val STALL_MIN_PROGRESS_MS = 500L
+private const val STALL_TIMEOUT_MS  = 10_000L
 
 // Shared by both flavors, unlike Home/Library/Detail — media3-ui's
 // PlayerView is a classic Android View with its own built-in D-pad-navigable
@@ -195,22 +201,39 @@ fun PlayerScreen(
     // changes (including from our own dialog's overrides re-triggering it).
     var currentTracks by remember { mutableStateOf(Tracks.EMPTY) }
 
-    // Timestamps (millis) of recent STATE_BUFFERING transitions for the live
-    // stall watchdog — see STALL_WINDOW_MS/STALL_THRESHOLD's own comment.
-    val stallTimestamps = remember { mutableListOf<Long>() }
+    // Live-channel stall watchdog: polls actual playback position rather
+    // than reacting to STATE_BUFFERING (see STALL_POLL_MS's own comment for
+    // why) — if position hasn't advanced by STALL_MIN_PROGRESS_MS across a
+    // poll tick while nominally playing, for STALL_TIMEOUT_MS straight,
+    // force a full reload the same way leaving/re-entering the channel does.
+    LaunchedEffect(viewModel.isLive) {
+        if (!viewModel.isLive) return@LaunchedEffect
+        var lastPos = -1L
+        var stalledSinceMs = -1L
+        while (true) {
+            delay(STALL_POLL_MS)
+            val pos = exoPlayer.currentPosition
+            val playing = exoPlayer.playWhenReady && exoPlayer.playbackState != Player.STATE_ENDED
+            when {
+                !playing -> { lastPos = -1L; stalledSinceMs = -1L }
+                lastPos < 0 -> { /* first sample, nothing to compare yet */ }
+                pos - lastPos < STALL_MIN_PROGRESS_MS -> {
+                    val now = System.currentTimeMillis()
+                    if (stalledSinceMs < 0) stalledSinceMs = now
+                    else if (now - stalledSinceMs > STALL_TIMEOUT_MS) {
+                        stalledSinceMs = -1L
+                        reloadTick++
+                    }
+                }
+                else -> stalledSinceMs = -1L
+            }
+            lastPos = pos
+        }
+    }
 
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_BUFFERING && viewModel.isLive) {
-                    val now = System.currentTimeMillis()
-                    stallTimestamps.add(now)
-                    stallTimestamps.removeAll { now - it > STALL_WINDOW_MS }
-                    if (stallTimestamps.size >= STALL_THRESHOLD) {
-                        stallTimestamps.clear()
-                        reloadTick++
-                    }
-                }
                 if (state != Player.STATE_ENDED) return
                 val next = viewModel.nextEpisode
                 if (next != null && !viewModel.upNextDismissed) advance(next) else viewModel.reportCompleted()
