@@ -1,5 +1,7 @@
 package com.pantheon.android.detail
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.BringIntoViewSpec
@@ -45,7 +47,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.tv.material3.Button
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
@@ -53,9 +54,13 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.pantheon.android.api.ApiClient
 import com.pantheon.android.ui.theme.LocalPantheonColors
+import com.pantheon.android.ui.theme.LocalPantheonMetrics
 import kotlinx.coroutines.launch
 
-private val HERO_HEIGHT = 320.dp
+// Hero backdrop height floor is now LocalPantheonMetrics.current.heroHeightTv
+// (hds-tile-hero-height-tv, index.css) — a real shared token with web's own
+// TvLibraryDetail.tsx (Detail cross-client consistency pass) instead of an
+// independently-hardcoded 320.dp that could silently drift from it.
 
 private val BackdropScrimBrush = Brush.verticalGradient(
     0f to Color.Transparent,
@@ -120,6 +125,7 @@ fun DetailScreen(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val colors = LocalPantheonColors.current
+    val heroHeight = LocalPantheonMetrics.current.heroHeightTv
     var watchTogetherLoading by remember { mutableStateOf(false) }
     val playFocusRequester = remember { FocusRequester() }
     var expandedSeasonNumber by remember { mutableStateOf<Int?>(null) }
@@ -171,10 +177,11 @@ fun DetailScreen(
             OverviewDialog(title = viewModel.title, overview = viewModel.overview, onClose = { overviewDialogOpen = false })
         }
 
-        // Only after the Play button is actually composed (hasZone gates
-        // whether it exists at all) — requestFocus() on an unattached
+        // Only after the Play button is actually composed (hasZone gates the
+        // whole zone, hasAction gates this specific button within it — see
+        // DetailViewModel.hasAction) — requestFocus() on an unattached
         // FocusRequester throws.
-        if (viewModel.hasZone("play-button")) {
+        if (viewModel.hasZone("play-button") && viewModel.hasAction("play")) {
             LaunchedEffect(Unit) { playFocusRequester.requestFocus() }
         }
 
@@ -186,7 +193,7 @@ fun DetailScreen(
                 // behind the list — so it's always in front of whatever
                 // season/episode content scrolls underneath once stuck.
                 Box(
-                    modifier = Modifier.fillMaxWidth().heightIn(min = HERO_HEIGHT)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = heroHeight)
                         .onGloballyPositioned { headerHeightPx = it.size.height },
                 ) {
                     if (viewModel.hasZone("hero-backdrop")) {
@@ -234,23 +241,37 @@ fun DetailScreen(
 
                                 if (viewModel.hasZone("play-button")) {
                                     Row(modifier = Modifier.padding(top = 14.dp)) {
-                                        Button(
-                                            onClick = ::goPlay,
-                                            modifier = Modifier.focusRequester(playFocusRequester),
-                                        ) { Text("▶  Play") }
-                                        TvTextButton(
-                                            text = "Play from Beginning",
-                                            onClick = ::goPlayFromBeginning,
-                                            modifier = Modifier.padding(start = 12.dp),
-                                        )
+                                        // Each button independently gated on the
+                                        // zone's `actions` list (kairos v105) —
+                                        // see DetailViewModel.hasAction. Icon-only
+                                        // when unfocused, expanding to icon+label
+                                        // on D-pad focus (CollapsibleActionButton)
+                                        // so all three comfortably sit inline
+                                        // instead of three full-text buttons
+                                        // competing for row width.
+                                        if (viewModel.hasAction("play")) {
+                                            CollapsibleActionButton(
+                                                icon = "▶", label = "Play", onClick = ::goPlay, filled = true,
+                                                modifier = Modifier.focusRequester(playFocusRequester),
+                                            )
+                                        }
+                                        if (viewModel.hasAction("play-from-beginning")) {
+                                            CollapsibleActionButton(
+                                                icon = "↺", label = "Play from Beginning",
+                                                onClick = ::goPlayFromBeginning,
+                                                modifier = Modifier.padding(start = 10.dp),
+                                            )
+                                        }
                                         // Movies and shows only (Kairos's own
                                         // content_type gate on POST
                                         // /api/watch-together).
-                                        TvTextButton(
-                                            text = if (watchTogetherLoading) "Starting…" else "Watch Together",
-                                            onClick = ::goWatchTogether,
-                                            modifier = Modifier.padding(start = 12.dp),
-                                        )
+                                        if (viewModel.hasAction("watch-together")) {
+                                            CollapsibleActionButton(
+                                                icon = "👥", label = if (watchTogetherLoading) "Starting…" else "Watch Together",
+                                                onClick = ::goWatchTogether,
+                                                modifier = Modifier.padding(start = 10.dp),
+                                            )
+                                        }
                                     }
                                 }
 
@@ -395,6 +416,51 @@ private fun TvTextButton(text: String, onClick: () -> Unit, modifier: Modifier =
     val colors = LocalPantheonColors.current
     Surface(onClick = onClick, modifier = modifier, colors = ClickableSurfaceDefaults.colors(containerColor = Color.Black.copy(alpha = 0.4f))) {
         Text(text, color = colors.txt, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+    }
+}
+
+// Play/Play from Beginning/Watch Together used to each be a full-text
+// button, which crowded the row once all three were visible at once (see
+// their call site's own comment). Collapsed to just `icon` while unfocused,
+// expanding to `icon`+`label` on D-pad focus — animateContentSize smoothly
+// grows/shrinks the Surface itself rather than snapping, using the shared
+// hds-transition-fast token (LocalPantheonMetrics) so the timing matches
+// hades' own quick-hover transitions instead of a locally-guessed duration.
+// `filled` mirrors the distinction the old tv.material3 Button (Play) vs
+// TvTextButton (the other two) had — Play stays visually primary even
+// collapsed.
+@Composable
+private fun CollapsibleActionButton(
+    icon: String,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    filled: Boolean = false,
+) {
+    val colors = LocalPantheonColors.current
+    val metrics = LocalPantheonMetrics.current
+    var focused by remember { mutableStateOf(false) }
+    val contentColor = if (filled) colors.txtOnGold else colors.txt
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .onFocusChanged { focused = it.isFocused }
+            .animateContentSize(animationSpec = tween(metrics.transitionFastMs)),
+        colors = if (filled) {
+            ClickableSurfaceDefaults.colors(containerColor = colors.gold, focusedContainerColor = colors.gold)
+        } else {
+            ClickableSurfaceDefaults.colors(containerColor = Color.Black.copy(alpha = 0.4f), focusedContainerColor = colors.bg4)
+        },
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = if (focused) 16.dp else 12.dp, vertical = 8.dp),
+        ) {
+            Text(icon, color = contentColor)
+            if (focused) {
+                Text(label, color = contentColor, modifier = Modifier.padding(start = 8.dp))
+            }
+        }
     }
 }
 

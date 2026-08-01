@@ -38,7 +38,8 @@ fun PantheonTheme(apiClient: ApiClient, content: @Composable () -> Unit) {
         onSurface = pantheonColors.txt,
         error = pantheonColors.matchRed,
     )
-    CompositionLocalProvider(LocalPantheonColors provides pantheonColors) {
+    val pantheonMetrics = pantheonMetricsFromTheme(theme)
+    CompositionLocalProvider(LocalPantheonColors provides pantheonColors, LocalPantheonMetrics provides pantheonMetrics) {
         MaterialTheme(colorScheme = colors, content = content)
     }
 }

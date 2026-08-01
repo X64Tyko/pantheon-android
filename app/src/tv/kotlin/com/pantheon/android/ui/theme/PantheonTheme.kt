@@ -64,7 +64,9 @@ fun PantheonTheme(apiClient: ApiClient, content: @Composable () -> Unit) {
         error = errorColor,
     )
 
-    CompositionLocalProvider(LocalPantheonColors provides pantheonColors) {
+    val pantheonMetrics = pantheonMetricsFromTheme(theme)
+
+    CompositionLocalProvider(LocalPantheonColors provides pantheonColors, LocalPantheonMetrics provides pantheonMetrics) {
         androidx.compose.material3.MaterialTheme(colorScheme = material3Colors) {
             androidx.tv.material3.MaterialTheme(colorScheme = tvColors, content = content)
         }

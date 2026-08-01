@@ -27,12 +27,24 @@ data class TvManifest(
 // manifest field.
 data class TvTheme(val version: Int, val tokens: TvThemeTokens)
 
-// Only `colors` is modeled — spacing/radii/fonts/etc. exist in the wire
-// shape too (see the generator script) but nothing on this client consumes
-// them yet; Gson ignores unmapped JSON keys by default, so leaving them out
-// here doesn't lose data for a caller that adds them later, just doesn't
-// parse them now.
-data class TvThemeTokens(val colors: Map<String, TvThemeColor> = emptyMap())
+// spacing/radii/transitions/sizing/fontSizes/fonts are all raw CSS value
+// strings (e.g. "12px", "0.2s", "'Chakra Petch', sans-serif") — unlike
+// colors there's no oklch()-to-hex reduction needed, generate-tv-tokens.mjs
+// just passes the declared value through as-is. See PantheonMetrics.kt for
+// the parsed/typed (Dp, millis) values screens actually consume, with
+// hardcoded fallbacks for tokens this client doesn't find. `shadows`/`other`
+// (see the generator's categoryOf()) are still deliberately unmodeled —
+// composite multi-layer CSS values with no single-number Compose equivalent
+// to parse them into; Gson ignores unmapped JSON keys, so this costs nothing.
+data class TvThemeTokens(
+    val colors: Map<String, TvThemeColor> = emptyMap(),
+    val spacing: Map<String, String> = emptyMap(),
+    val radii: Map<String, String> = emptyMap(),
+    val transitions: Map<String, String> = emptyMap(),
+    val sizing: Map<String, String> = emptyMap(),
+    val fontSizes: Map<String, String> = emptyMap(),
+    val fonts: Map<String, String> = emptyMap(),
+)
 
 // hex is null for composite values the generator can't reduce to a single
 // color (gradients, multi-layer shadows, `var()` references) — see
@@ -45,7 +57,7 @@ data class TvZoneSection(val zones: List<TvZone>)
 data class TvHomeRow(
     val id: String,
     val order: Int,
-    val type: String, // "hero" | "shelf" | "guide"
+    val type: String, // "hero" | "shelf" | "guide" | "watch-together"
     val title: String? = null,
     // Opaque — forwarded verbatim as query params to GET /api/tv/shelf-items
     // (see KairosApi.getShelfItems). Never inspected/branched on client-side;
@@ -61,16 +73,12 @@ data class TvHomeRow(
     val actions: List<String>? = null,
 )
 
-// Still used by TvZone (Library/Detail/Guide) — those carry a genuinely
-// different, per-zone endpoint/queryParam config (see kairos's tv_zone seed
-// data) that no client fetches through automatically; only
-// filterFields/fields are actually read. Home rows no longer use this.
-data class TvDataSource(
-    val endpoint: String? = null,
-    val endpoints: List<String>? = null,
-    val params: Map<String, Any>? = null,
-    val queryParam: String? = null,
-)
+// TvDataSource/TvZone.dataSource removed in kairos v105 — confirmed dead on
+// every client (nothing anywhere ever read `.dataSource`, on this client or
+// hades' /tv), a stale leftover from before Home rows moved to the opaque
+// `filter` shape TvHomeRow.filter carries. Was a half-implemented per-zone
+// endpoint/queryParam config no client ever actually fetched through
+// automatically.
 
 // GET /api/tv/shelf-items' response item shape — render-ready, uniform
 // across show/movie/episode content types (see kairos's MixedTileRow).
@@ -108,7 +116,6 @@ data class ShelfTileLatestEpisode(
 data class TvZone(
     val id: String,
     val order: Int,
-    val dataSource: TvDataSource? = null,
     val filterFields: List<String>? = null,
     val sortOptions: List<String>? = null,
     val itemAction: String? = null,
@@ -120,6 +127,14 @@ data class TvZone(
     // manifest that predates it, so callers fall back to their own fixed
     // field set rather than rendering nothing.
     val fields: List<String>? = null,
+    // Which action buttons this zone offers — currently only detail's
+    // play-button zone declares this (kairos v105: "play"/"play-from-beginning"/
+    // "watch-together"). Loose List<String> rather than a closed enum, same
+    // "server owns the vocabulary" reasoning as filterFields/fields. Null
+    // means a manifest predating this field (or a zone that's never declared
+    // it) — callers should default to showing whatever they showed before
+    // this field existed, not nothing.
+    val actions: List<String>? = null,
 )
 
 // The closed itemAction/endTile vocabulary — matches hades/src/api/types.ts's

@@ -46,8 +46,19 @@ class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
     // Every currently-open Watch Together session (any account, not just
     // this viewer's own) — see kairos's GET /api/watch-together/active and
     // hades' own WatchTogetherShelf on HomePage.tsx, the same discovery
-    // surface this mirrors.
+    // surface this mirrors. Only fetched when a 'watch-together' row is
+    // actually present in the manifest (kairos v105) — same "presence in
+    // rows gates the fetch" treatment continue-watching/hero already get,
+    // rather than the unconditional fetch this used to be.
     var watchTogether by mutableStateOf<List<WatchTogetherSession>>(emptyList())
+        private set
+
+    // Gates the Home screen's "Library" quick-action the same way rows.any
+    // { type == "guide" } already gates "Guide" — an instance with zero
+    // library zones configured (kairos tv_zone) has nothing for that button
+    // to lead to. Library is a whole separate manifest section (not a home
+    // row), so this needs its own flag rather than piggybacking on `rows`.
+    var hasLibraryZones by mutableStateOf(false)
         private set
 
     // Optimistic local removal after this viewer closes/leaves one from the
@@ -82,6 +93,7 @@ class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
             try {
                 val manifest = apiClient.service.getTvManifest()
                 rows = manifest.home.rows.sortedBy { it.order }
+                hasLibraryZones = manifest.library.zones.isNotEmpty()
 
                 // Every shelf row the manifest declares, not a fixed
                 // client-side allowlist — a shelf Kairos adds/removes only
@@ -95,7 +107,9 @@ class HomeViewModel(private val apiClient: ApiClient) : ViewModel() {
                     runCatching { apiClient.service.getWatchProgress() }.getOrDefault(emptyList())
                 } else emptyList()
 
-                watchTogether = runCatching { apiClient.service.getActiveWatchTogether() }.getOrDefault(emptyList())
+                watchTogether = if (rows.any { it.type == "watch-together" }) {
+                    runCatching { apiClient.service.getActiveWatchTogether() }.getOrDefault(emptyList())
+                } else emptyList()
 
                 val shelfRows = rows.filter { it.type == "shelf" && it.id != "continue-watching" }
                 fetchShelfRows(shelfRows)

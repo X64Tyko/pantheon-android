@@ -34,6 +34,18 @@ class DetailViewModel(private val apiClient: ApiClient, private val contentType:
     fun hasZone(zoneId: String) = zones.any { it.id == zoneId }
     fun zone(zoneId: String) = zones.find { it.id == zoneId }
 
+    // Which of "play"/"play-from-beginning"/"watch-together" the play-button
+    // zone actually offers (kairos v105's `actions` list) — a zone that
+    // exists but predates this field (actions == null) defaults to showing
+    // all three, same back-compat stance metaFields/filterFields already
+    // take for their own optional fields. A missing zone entirely (no
+    // play-button at all) shows none, though callers should already be
+    // gating the whole section on hasZone("play-button") before reaching here.
+    fun hasAction(action: String): Boolean {
+        val z = zone("play-button") ?: return false
+        return z.actions?.contains(action) ?: true
+    }
+
     // Which fields the meta-block zone renders (kairos v97) — falls back to
     // today's fixed set for a manifest that predates the `fields` key, same
     // "server owns which fields exist" split filterFields/sortOptions use.

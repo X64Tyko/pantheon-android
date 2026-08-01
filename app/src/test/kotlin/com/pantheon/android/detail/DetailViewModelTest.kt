@@ -10,6 +10,7 @@ import com.pantheon.android.api.dto.SeasonRef
 import com.pantheon.android.api.dto.ShowDetail
 import com.pantheon.android.api.dto.TvHomeSection
 import com.pantheon.android.api.dto.TvManifest
+import com.pantheon.android.api.dto.TvZone
 import com.pantheon.android.api.dto.TvZoneSection
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -161,5 +162,44 @@ class DetailViewModelTest {
         val viewModel = DetailViewModel(apiClient, "show", "show-1")
 
         assertNull(viewModel.playFromBeginningTarget())
+    }
+
+    // ── hasAction() — kairos v105's play-button zone `actions` list ────────────
+
+    private suspend fun movieViewModelWithZones(zones: List<TvZone>): DetailViewModel {
+        coEvery { service.getTvManifest() } returns TvManifest(
+            version = 1, home = TvHomeSection(emptyList()),
+            library = TvZoneSection(emptyList()), detail = TvZoneSection(zones), guide = TvZoneSection(emptyList()),
+        )
+        return newMovieViewModel()
+    }
+
+    @Test
+    fun `hasAction defaults to true for a play-button zone with no actions list (predates v105)`() = runTest {
+        val viewModel = movieViewModelWithZones(listOf(TvZone(id = "play-button", order = 0)))
+
+        assertEquals(true, viewModel.hasAction("play"))
+        assertEquals(true, viewModel.hasAction("play-from-beginning"))
+        assertEquals(true, viewModel.hasAction("watch-together"))
+    }
+
+    @Test
+    fun `hasAction respects an explicit actions list, excluding whatever is not in it`() = runTest {
+        val viewModel = movieViewModelWithZones(
+            listOf(TvZone(id = "play-button", order = 0, actions = listOf("play", "watch-together"))),
+        )
+
+        assertEquals(true, viewModel.hasAction("play"))
+        assertFalse(viewModel.hasAction("play-from-beginning"))
+        assertEquals(true, viewModel.hasAction("watch-together"))
+    }
+
+    @Test
+    fun `hasAction is false for every action when the play-button zone is absent entirely`() = runTest {
+        val viewModel = movieViewModelWithZones(emptyList())
+
+        assertFalse(viewModel.hasAction("play"))
+        assertFalse(viewModel.hasAction("play-from-beginning"))
+        assertFalse(viewModel.hasAction("watch-together"))
     }
 }

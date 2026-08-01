@@ -193,23 +193,34 @@ fun DetailScreen(
                                     }
 
                                     if (viewModel.hasZone("play-button")) {
-                                        Row(modifier = Modifier.padding(top = 10.dp)) {
-                                            androidx.compose.material3.Button(onClick = ::goPlay) { Text("▶  Play") }
-                                            androidx.compose.material3.OutlinedButton(
-                                                onClick = ::goPlayFromBeginning,
-                                                modifier = Modifier.padding(start = 10.dp),
-                                            ) { Text("Play from Beginning") }
+                                        // Each button independently gated on the
+                                        // zone's `actions` list (kairos v105) —
+                                        // see DetailViewModel.hasAction.
+                                        if (viewModel.hasAction("play") || viewModel.hasAction("play-from-beginning")) {
+                                            Row(modifier = Modifier.padding(top = 10.dp)) {
+                                                if (viewModel.hasAction("play")) {
+                                                    androidx.compose.material3.Button(onClick = ::goPlay) { Text("▶  Play") }
+                                                }
+                                                if (viewModel.hasAction("play-from-beginning")) {
+                                                    androidx.compose.material3.OutlinedButton(
+                                                        onClick = ::goPlayFromBeginning,
+                                                        modifier = Modifier.padding(start = 10.dp),
+                                                    ) { Text("Play from Beginning") }
+                                                }
+                                            }
                                         }
                                         // Movies and shows only (Kairos's own
                                         // content_type gate on POST
                                         // /api/watch-together) — never shown for
                                         // a channel since this screen doesn't
                                         // apply to those anyway.
-                                        androidx.compose.material3.OutlinedButton(
-                                            onClick = ::goWatchTogether,
-                                            enabled = !watchTogetherLoading,
-                                            modifier = Modifier.padding(top = 8.dp),
-                                        ) { Text(if (watchTogetherLoading) "Starting…" else "Watch Together") }
+                                        if (viewModel.hasAction("watch-together")) {
+                                            androidx.compose.material3.OutlinedButton(
+                                                onClick = ::goWatchTogether,
+                                                enabled = !watchTogetherLoading,
+                                                modifier = Modifier.padding(top = 8.dp),
+                                            ) { Text(if (watchTogetherLoading) "Starting…" else "Watch Together") }
+                                        }
                                     }
                                 }
                             }

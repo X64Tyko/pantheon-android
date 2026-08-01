@@ -170,7 +170,13 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    OutlinedButton(onClick = onNavigateLibrary) { Text("Library") }
+                    // Gated on the manifest actually declaring library zones
+                    // (kairos v105) — an instance with none configured has
+                    // nowhere for this button to lead, same treatment Guide
+                    // already got.
+                    if (viewModel.hasLibraryZones) {
+                        OutlinedButton(onClick = onNavigateLibrary) { Text("Library") }
+                    }
                     if (viewModel.rows.any { it.type == "guide" }) {
                         OutlinedButton(onClick = onNavigateGuide) { Text("📺  Guide") }
                     }
@@ -178,18 +184,23 @@ fun HomeScreen(
                     OutlinedButton(onClick = onSwitchProfile) { Text("👤") }
                 }
             }
-            if (viewModel.watchTogether.isNotEmpty()) {
-                item {
-                    WatchTogetherZone(
-                        apiClient = apiClient,
-                        items = viewModel.watchTogether,
-                        onJoin = ::joinWatchTogether,
-                        onClose = ::closeWatchTogether,
-                    )
-                }
-            }
+            // Watch Together is a real 'watch-together'-typed row now (kairos
+            // v105), rendered through the same generic ordered-row loop as
+            // every other row instead of a hardcoded block positioned ahead
+            // of it — gated on the row's presence, not just on there
+            // happening to be active sessions right now.
             items(viewModel.rows.filter { it.type != "hero" && it.type != "guide" }, key = { it.id }) { row ->
                 when {
+                    row.type == "watch-together" -> {
+                        if (viewModel.watchTogether.isNotEmpty()) {
+                            WatchTogetherZone(
+                                apiClient = apiClient,
+                                items = viewModel.watchTogether,
+                                onJoin = ::joinWatchTogether,
+                                onClose = ::closeWatchTogether,
+                            )
+                        }
+                    }
                     row.id == "continue-watching" -> {
                         if (viewModel.continueWatching.isNotEmpty()) {
                             ContinueWatchingZone(
