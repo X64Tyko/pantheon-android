@@ -143,6 +143,11 @@ dependencies {
     implementation("androidx.core:core-ktx:1.19.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    // ProcessLifecycleOwner — whole-app foreground/background signal for
+    // PlayerScreen's pause-on-background handling, distinct from any single
+    // Activity's own onStop (which fires on activity-to-activity navigation
+    // too, not just the app actually leaving the foreground).
+    implementation("androidx.lifecycle:lifecycle-process:2.11.0")
     implementation("androidx.navigation:navigation-compose:2.9.8")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
