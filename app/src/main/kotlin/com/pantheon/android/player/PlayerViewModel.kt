@@ -291,8 +291,22 @@ class PlayerViewModel(
     // Called every PROGRESS_PING_MS by the player screen's own timer, fed
     // the player's raw (manifest-relative) position — mirrors PlayerPage.tsx's
     // interval ping exactly, same 0-guard against a not-yet-started player.
+    // Live channels have no position/duration to report — reuses the same
+    // endpoint/DTO with contentType="channel" (Kairos's watch-progress route
+    // branches on that before any position/duration logic runs) rather than
+    // a separate one, since position_ms/duration_ms are just ignored there;
+    // this only ever feeds PlaybackHistoryRepository, never
+    // WatchProgressRepository (see PlaybackService.cpp's own comment) — same
+    // "who's watching what" telemetry PlayerPage.tsx's channel-only ping
+    // effect feeds, previously entirely missing for any non-web client.
     fun reportProgress(playerPositionMs: Long) {
-        if (isLive || durationMs <= 0) return
+        if (isLive) {
+            viewModelScope.launch { runCatching {
+                apiClient.service.putWatchProgress("channel", contentId, WatchProgressBody(0, 0, deviceType = deviceType, directStream = directStream))
+            } }
+            return
+        }
+        if (durationMs <= 0) return
         val absolute = basePositionMs + playerPositionMs
         if (absolute <= 0) return
         viewModelScope.launch { runCatching {
