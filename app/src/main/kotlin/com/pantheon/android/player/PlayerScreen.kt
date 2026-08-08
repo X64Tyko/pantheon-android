@@ -57,7 +57,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
 import com.pantheon.android.api.ApiClient
@@ -121,7 +123,25 @@ fun PlayerScreen(
     val colors = LocalPantheonColors.current
 
     val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply { playWhenReady = true }
+        // Media3's DefaultHttpDataSource defaults to an 8s connect/read
+        // timeout — comfortably enough for an already-generated segment, but
+        // well under Hephaestus's own documented cold-start budget for a
+        // freshly-spawned VOD head (Router.cpp's waitForFile(path, 25000) —
+        // NVENC/VAAPI init, or just a loaded host, routinely lands in the
+        // 15-20s range). A browser's fetch() has no comparable timeout, so
+        // hls.js just waits it out; ExoPlayer was instead aborting the
+        // request as a load error partway through the cold start, reading
+        // as playback freezing a couple of seconds in while the server side
+        // encode (unaware anyone gave up) kept right on producing segments
+        // nobody was going to ask for again. 30s comfortably clears the
+        // server's own 25s ceiling.
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(30_000)
+            .setReadTimeoutMs(30_000)
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(httpDataSourceFactory))
+            .build()
+            .apply { playWhenReady = true }
     }
     DisposableEffect(Unit) {
         onDispose { exoPlayer.release() }
