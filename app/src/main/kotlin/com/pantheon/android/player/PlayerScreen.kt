@@ -259,6 +259,16 @@ fun PlayerScreen(
     // changes (including from our own dialog's overrides re-triggering it).
     var currentTracks by remember { mutableStateOf(Tracks.EMPTY) }
 
+    // Drives PlayerView.keepScreenOn below — without it the device's normal
+    // screen-timeout still fires mid-playback (no touch input during a
+    // movie), turning off the display and, on phones, locking the screen
+    // entirely. Toggled off `onPlayWhenReadyChanged` (below) so an explicit
+    // pause still lets the screen sleep normally. Seeded from exoPlayer's
+    // current value, not `false` — playWhenReady is already set true at
+    // construction above, before this listener attaches, and a Player.Listener
+    // only fires on subsequent changes, never the value already in effect.
+    var keepScreenOnWhilePlaying by remember { mutableStateOf(exoPlayer.playWhenReady) }
+
     // Live-channel stall watchdog: polls actual playback position rather
     // than reacting to STATE_BUFFERING (see STALL_POLL_MS's own comment for
     // why) — if position hasn't advanced by STALL_MIN_PROGRESS_MS across a
@@ -307,6 +317,10 @@ fun PlayerScreen(
             // intent, not transient buffering-caused rate drops.
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (viewModel.isWtHost) viewModel.sendWtCommand(if (playWhenReady) "play" else "pause")
+                // Same playWhenReady-not-isPlaying reasoning as above — the
+                // screen shouldn't dim mid-buffer just because the decoder is
+                // transiently starved, only once the user has actually paused.
+                keepScreenOnWhilePlaying = playWhenReady
             }
             // DISCONTINUITY_REASON_SEEK only — excludes the ordinary forward
             // discontinuities between HLS segments, which aren't a seek at all.
@@ -407,6 +421,7 @@ fun PlayerScreen(
                 update = { view ->
                     view.findViewById<View>(androidx.media3.ui.R.id.exo_settings)
                         ?.setOnClickListener { showTrackMenu = true }
+                    view.keepScreenOn = keepScreenOnWhilePlaying
                 },
                 modifier = Modifier.fillMaxSize(),
             )
