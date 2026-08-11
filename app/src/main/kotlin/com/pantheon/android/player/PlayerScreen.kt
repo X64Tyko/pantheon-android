@@ -178,7 +178,25 @@ fun PlayerScreen(
         // so ExoPlayer discovers every track straight from it.
         val itemBuilder = MediaItem.Builder().setUri(url)
         if (viewModel.isLive) {
-            exoPlayer.setMediaItem(itemBuilder.build())
+            // On the *first* load exoPlayer.currentPosition is 0 (fresh
+            // instance) — leaving the start position unset here is correct,
+            // it lets media3 pick the real live edge itself. But this same
+            // effect also re-runs on a reloadTick bump (the stall watchdog
+            // below forcing a full source rebuild on the same, still-alive
+            // exoPlayer instance) — in that case currentPosition reflects
+            // wherever playback actually was, and leaving the start position
+            // unset makes media3 recompute its own live edge fresh from the
+            // just-reloaded window instead. Hephaestus's splicer deliberately
+            // keeps an outgoing item's tail segments in the same window as
+            // the incoming item's (see ChannelPlaylistSplicer's own comment)
+            // for gapless transitions, so that freshly-computed default can
+            // land inside already-aired segments — the Android counterpart of
+            // the rewind bug fixed in VideoPlayer.tsx's `new Hls()` call and
+            // its NETWORK_ERROR startLoad() retry. Pinning currentPosition
+            // here whenever it's nonzero closes the same gap.
+            val resumeAt = exoPlayer.currentPosition.takeIf { it > 0 }
+            if (resumeAt != null) exoPlayer.setMediaItem(itemBuilder.build(), resumeAt)
+            else exoPlayer.setMediaItem(itemBuilder.build())
         } else {
             // VOD sessions are served as a growing HLS "event" playlist while
             // Hephaestus is still transcoding (VodSession.cpp's
