@@ -19,7 +19,7 @@ android {
     // straight to "0.2.150" instead of "0.2.1"). versionCode itself is
     // never reset this way — see its own comment below for why.
     val versionMajorMinor = "0.2"
-    val versionBaseBuild = 16
+    val versionBaseBuild = 17
 
     defaultConfig {
         applicationId = "com.pantheon.android"
