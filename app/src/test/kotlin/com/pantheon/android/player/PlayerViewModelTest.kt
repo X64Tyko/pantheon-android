@@ -16,7 +16,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Before
@@ -37,6 +36,13 @@ class PlayerViewModelTest {
     private lateinit var apiClient: ApiClient
     private lateinit var service: KairosApi
 
+    // Plain @Test on an UnconfinedTestDispatcher (same harness as
+    // GuideViewModelTest), NOT runTest: load() starts an indefinite VOD
+    // heartbeat loop (delay + ping) on viewModelScope, which never completes —
+    // runTest would fail every test here with UncompletedCoroutinesError
+    // waiting on it. Unconfined runs the launched work eagerly to its first
+    // suspension, so mocked calls land synchronously and the heartbeat just
+    // parks at its delay instead of hanging the test.
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -68,13 +74,13 @@ class PlayerViewModelTest {
     }
 
     @Test
-    fun `startVodPlayback is called with the resume position, not a hardcoded 0`() = runTest {
+    fun `startVodPlayback is called with the resume position, not a hardcoded 0`() {
         newViewModel(initialPositionMs = 754_000L)
         coVerify { service.startVodPlayback(VodStartRequest(contentType = "movie", contentId = "content-1", positionMs = 754_000L)) }
     }
 
     @Test
-    fun `reportProgress adds the player-relative position onto basePositionMs`() = runTest {
+    fun `reportProgress adds the player-relative position onto basePositionMs`() {
         val viewModel = newViewModel(initialPositionMs = 754_000L)
         val body = slot<WatchProgressBody>()
         coEvery { service.putWatchProgress("movie", "content-1", capture(body)) } returns mockk(relaxed = true)
@@ -88,7 +94,7 @@ class PlayerViewModelTest {
     }
 
     @Test
-    fun `reportProgress with a fresh (0-based) session still reports the raw player position`() = runTest {
+    fun `reportProgress with a fresh (0-based) session still reports the raw player position`() {
         val viewModel = newViewModel(initialPositionMs = 0L)
         val body = slot<WatchProgressBody>()
         coEvery { service.putWatchProgress("movie", "content-1", capture(body)) } returns mockk(relaxed = true)
@@ -119,21 +125,21 @@ class PlayerViewModelTest {
     }
 
     @Test
-    fun `host heartbeat actually posts to Hermes`() = runTest {
+    fun `host heartbeat actually posts to Hermes`() {
         val viewModel = newHostViewModel()
         viewModel.sendWtHeartbeat(positionMs = 12_000L, paused = false)
         coVerify { service.postWatchTogetherHeartbeat("wt-1", WatchTogetherHeartbeatBody(12_000L, false)) }
     }
 
     @Test
-    fun `follower heartbeat is a no-op — only the host drives Hermes' baseline`() = runTest {
+    fun `follower heartbeat is a no-op — only the host drives Hermes' baseline`() {
         val viewModel = newFollowerViewModel()
         viewModel.sendWtHeartbeat(positionMs = 12_000L, paused = false)
         coVerify(exactly = 0) { service.postWatchTogetherHeartbeat(any(), any()) }
     }
 
     @Test
-    fun `follower command dispatch is also a no-op`() = runTest {
+    fun `follower command dispatch is also a no-op`() {
         val viewModel = newFollowerViewModel()
         viewModel.sendWtCommand("seek", 5_000L)
         coVerify(exactly = 0) { service.postWatchTogetherCommand(any(), any()) }
