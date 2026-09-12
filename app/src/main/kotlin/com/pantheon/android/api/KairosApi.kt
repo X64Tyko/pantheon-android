@@ -153,6 +153,9 @@ interface KairosApi {
     @POST("stream/vod/{id}/stop")
     suspend fun stopVodPlayback(@Path("id") sessionId: String): Response<Unit>
 
+    @GET("stream/vod/{id}/ping")
+    suspend fun pingVodSession(@Path("id") sessionId: String): Response<Unit>
+
     // Capability-bucketed live channel HLS (see hephaestus/src/stream/
     // ChannelViewerRegistry.h) — an opt-in per-viewer session on top of the
     // legacy liveChannelManifestUrl(), which stays as the fallback. No

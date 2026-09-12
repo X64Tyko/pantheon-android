@@ -198,26 +198,14 @@ fun PlayerScreen(
             if (resumeAt != null) exoPlayer.setMediaItem(itemBuilder.build(), resumeAt)
             else exoPlayer.setMediaItem(itemBuilder.build())
         } else {
-            // VOD sessions are served as a growing HLS "event" playlist while
-            // Hephaestus is still transcoding (VodSession.cpp's
-            // -hls_playlist_type event) — no #EXT-X-ENDLIST until the whole
-            // file finishes, and unlike live channels (paced with -re) the
-            // VOD encode races ahead as fast as the hardware allows, so
-            // several segments can already exist by the time this session's
-            // manifest is first fetched. ExoPlayer's HLS source decides
-            // "is this live" purely from ENDLIST absence, same as hls.js —
-            // without an explicit start position it defaults an unprepared
-            // dynamic window to the live edge, so playback jumped straight to
-            // wherever the transcode had currently raced ahead to instead of
-            // the actual beginning.
-            //
-            // The manifest's timeline is the whole source file on its real,
-            // absolute timeline (VodSession::buildStaticPlaylist emits every
-            // segment from file-start to file-end immediately) — position_ms
-            // only tells Hephaestus which segment to encode *first* for a
-            // fast first byte, it doesn't trim or renumber the playlist. So
-            // resuming requires an explicit seek to basePositionMs here, same
-            // as VideoPlayer.tsx's `startPosition: startPositionSec ?? 0`.
+            // VodSession::buildStaticPlaylist emits the complete segment list
+            // (file-start to file-end) with #EXT-X-PLAYLIST-TYPE:VOD and
+            // #EXT-X-ENDLIST immediately at session start — ExoPlayer correctly
+            // treats this as on-demand, not live. position_ms in the start
+            // request only tells Hephaestus which segment to encode *first*
+            // for a fast cold start; it doesn't trim or renumber the playlist.
+            // The seek to basePositionMs here is the resume position (same as
+            // VideoPlayer.tsx's `startPosition: startPositionSec ?? 0`).
             exoPlayer.setMediaItem(itemBuilder.build(), viewModel.basePositionMs)
         }
         exoPlayer.prepare()

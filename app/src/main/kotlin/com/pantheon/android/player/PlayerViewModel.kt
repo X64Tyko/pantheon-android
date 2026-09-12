@@ -20,6 +20,7 @@ import com.pantheon.android.api.dto.WatchTogetherSession
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
@@ -272,6 +273,7 @@ class PlayerViewModel(
                 title = res.title
                 durationMs = res.durationMs
                 directStream = res.directStream
+                startHeartbeat(myGen)
             }.onFailure { e ->
                 errorMessage = e.message ?: "Failed to start playback"
             }
@@ -321,6 +323,17 @@ class PlayerViewModel(
         viewModelScope.launch { runCatching {
             apiClient.service.putWatchProgress(kind, contentId, WatchProgressBody(durationMs, durationMs, completed = true, deviceType = deviceType, directStream = directStream))
         } }
+    }
+
+    private fun startHeartbeat(myGen: Int) {
+        viewModelScope.launch {
+            while (generation == myGen) {
+                delay(60_000)
+                val sid = sessionId
+                if (sid == null || generation != myGen) break
+                runCatching { apiClient.service.pingVodSession(sid) }
+            }
+        }
     }
 
     // GlobalScope deliberate — see GuideViewModel.stopCurrentPreview()'s
